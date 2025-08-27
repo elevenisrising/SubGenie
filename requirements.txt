@@ -1,0 +1,6 @@
+openai-whisper
+deep-translator
+tqdm
+srt
+pydub
+nltk

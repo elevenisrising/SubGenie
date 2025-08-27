@@ -1,0 +1,17 @@
+# Python generated files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Gemini CLI cache
+.cache/
+
+# Input and Output directories
+input_audio/
+output_subtitles/
+
+# IDE and OS specific files
+.idea/
+.vscode/
+.DS_Store
