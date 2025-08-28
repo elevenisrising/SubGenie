@@ -50,7 +50,7 @@ def load_module_from_file(module_name, file_path):
 
 # Load shared functions from main.py
 try:
-    main_module = load_module_from_file("main", "main.py")
+    main_module = load_module_from_file("main", "V1/main.py")
     # Import the functions we need
     load_glossary = main_module.load_glossary
     apply_glossary = main_module.apply_glossary

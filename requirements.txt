@@ -4,3 +4,5 @@ tqdm
 srt
 pydub
 nltk
+spacy
+requests
