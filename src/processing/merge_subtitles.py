@@ -6,7 +6,7 @@ import re
 # Define the main directory for output subtitles
 OUTPUT_DIR = 'output_subtitles'
 
-def merge_subtitles(directory_name, lang_code):
+def merge_subtitles(directory_name, lang_code, subfolder=None):
     """
     Merges all chunk_*.srt files in the specified folder.
     Optionally extracts only a specific language from bilingual subtitles.
@@ -14,8 +14,11 @@ def merge_subtitles(directory_name, lang_code):
     Args:
         directory_name (str): The name of the subdirectory under OUTPUT_DIR.
         lang_code (str): 'all', 'en', or 'zh' to specify which language to keep.
+        subfolder (str): Optional subfolder (e.g., 'local_llm', 'api_llm') containing translated chunks.
     """
     target_dir = os.path.join(OUTPUT_DIR, directory_name)
+    if subfolder:
+        target_dir = os.path.join(target_dir, subfolder)
 
     if not os.path.isdir(target_dir):
         print(f"Error: Directory '{target_dir}' does not exist.")
@@ -63,11 +66,16 @@ def merge_subtitles(directory_name, lang_code):
     for i, sub in enumerate(all_subtitles):
         sub.index = i + 1
 
-    # Define the output filename with language code
-    if lang_code == 'all':
-        output_filename = f"{directory_name}_merged.srt"
+    # Define the output filename with language code and subfolder
+    if subfolder:
+        base_name = f"{directory_name}_{subfolder}"
     else:
-        output_filename = f"{directory_name}_merged_{lang_code}.srt"
+        base_name = directory_name
+        
+    if lang_code == 'all':
+        output_filename = f"{base_name}_merged.srt"
+    else:
+        output_filename = f"{base_name}_merged_{lang_code}.srt"
         
     output_path = os.path.join(target_dir, output_filename)
 
@@ -97,6 +105,11 @@ if __name__ == '__main__':
         choices=['all', 'en', 'zh'],
         help="Language to extract: 'en' for English, 'zh' for Chinese, 'all' for both (default: all)"
     )
+    parser.add_argument(
+        "--subfolder",
+        type=str,
+        help="Subfolder containing translated chunks (e.g., 'local_llm', 'api_llm')"
+    )
 
     args = parser.parse_args()
-    merge_subtitles(args.directory, args.lang)
+    merge_subtitles(args.directory, args.lang, args.subfolder)

@@ -1,3 +1,25 @@
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Test and coverage reports
+.pytest_cache/
+.coverage
+
+# Configuration files with secrets
+settings.json
+*.env
+
+# Log files
+logs/
+*.log
+
 # Python generated files
 __pycache__/
 *.pyc
@@ -15,3 +37,4 @@ output_subtitles/
 .idea/
 .vscode/
 .DS_Store
+Thumbs.db

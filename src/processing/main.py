@@ -14,7 +14,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List
 
-import nltk
+import spacy
+
+# --- spaCy Model Loading ---
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    logging.error("spaCy English model 'en_core_web_sm' not found.")
+    logging.error(f"Please run 'D:\\Anaconda\\envs\\asr-env\\python.exe -m spacy download en_core_web_sm' to install it.")
+    sys.exit(1)
 import numpy as np
 import srt
 import torch
@@ -30,7 +38,7 @@ LOG_FORMAT = '%(asctime)s - [%(levelname)s] - %(message)s'
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
 # --- Constants ---
-GLOSSARY_FILE_NAME = "glossary.json"
+GLOSSARY_FILE_NAME = "src/utils/glossary.json"
 CACHE_DIR = ".cache"
 CACHE_EXPIRY_DAYS = 7
 MERGE_WORD_THRESHOLD = 5
@@ -314,151 +322,110 @@ def plan_and_split_audio(audio_path: Path, paths: Dict[str, Path], args: argpars
     
     return timing_info
 
-# --- Subtitle Processing ---
-def smart_segment_break(segments: List[Dict]) -> List[Dict]:
-    """Apply intelligent sentence segmentation using NLTK."""
-    try:
-        nltk.data.find('tokenizers/punkt_tab')
-    except LookupError:
-        logging.info("Downloading NLTK 'punkt_tab' tokenizer...")
-        nltk.download('punkt_tab', quiet=True)
-
-    improved = []
-    for seg in segments:
-        text = seg['text'].strip()
-        if not text:
-            continue
-        
-        sentences = nltk.sent_tokenize(text)
-        
-        if len(sentences) <= 1:
-            improved.append(seg)
-        else:
-            # Split proportionally by sentence length
-            current_time = seg['start']
-            total_len = len(text)
-            
-            for sentence in sentences:
-                if len(sentence.strip()) <= 10 and improved:
-                    # Merge short exclamations with previous segment
-                    improved[-1]['text'] += " " + sentence.strip()
-                    improved[-1]['end'] = current_time + (seg['end'] - seg['start']) * len(sentence) / total_len
-                else:
-                    ratio = len(sentence) / total_len if total_len > 0 else 0
-                    end_time = current_time + (seg['end'] - seg['start']) * ratio
-                    
-                    new_seg = {
-                        'text': sentence.strip(),
-                        'start': current_time,
-                        'end': end_time,
-                        'words': seg.get('words', [])
-                    }
-                    improved.append(new_seg)
-                    current_time = end_time
-    
-    return improved
-
-def find_best_backward_split(text: str, max_chars: int) -> int:
-    """Find the best split point working backward from max_chars."""
-    if len(text) <= max_chars:
-        return len(text)
-    
-    # Look for sentence boundaries first
-    for punct in FINAL_PUNCTUATION:
-        pos = text.rfind(punct, 0, max_chars)
-        if pos > max_chars // 2:  # Don't split too early
-            return pos + 1
-    
-    # Look for word boundaries
-    pos = text.rfind(' ', 0, max_chars)
-    if pos > max_chars // 2:
-        return pos
-    
-    # Last resort: character boundary
-    return max_chars
-
-def split_with_backward_priority(segment: Dict, max_chars: int) -> List[Dict]:
-    """Split segment using backward priority strategy."""
-    text = segment['text']
-    if len(text) <= max_chars:
-        return [segment]
-    
-    result = []
-    current_text = text
-    current_start = segment['start']
-    total_duration = segment['end'] - segment['start']
-    
-    while len(current_text) > max_chars:
-        split_pos = find_best_backward_split(current_text, max_chars)
-        
-        part1 = current_text[:split_pos].strip()
-        current_text = current_text[split_pos:].strip()
-        
-        # Calculate timing
-        ratio = len(part1) / len(text)
-        part_duration = total_duration * ratio
-        part_end = current_start + part_duration
-        
-        result.append({
-            'text': part1,
-            'start': current_start,
-            'end': part_end,
-            'words': segment.get('words', [])
-        })
-        
-        current_start = part_end
-    
-    # Add remaining text
-    if current_text:
-        result.append({
-            'text': current_text,
-            'start': current_start,
-            'end': segment['end'],
-            'words': segment.get('words', [])
-        })
-    
-    return result
-
+# --- Subtitle Processing (spaCy Implementation) ---
 def structure_and_split_segments(transcription_result: Dict, max_chars: int) -> List[Dict]:
-    """The definitive function for structuring subtitles."""
-    segments = smart_segment_break(transcription_result.get("segments", []))
-    if not segments:
+    """Structures subtitles using spaCy with a two-step process for natural segmentation."""
+    all_words = []
+    for seg in transcription_result.get("segments", []):
+        if 'words' in seg and seg['words']:
+            all_words.extend(seg['words'])
+    
+    if not all_words:
+        logging.warning("Word-level timestamps not found. spaCy segmentation requires it.")
         return []
-    
-    # Step 1: Merge short, incomplete segments
-    merged = []
-    buffer = segments[0].copy()
-    
-    for seg in segments[1:]:
-        current_text = seg['text'].strip()
-        buffer_text = buffer['text'].strip()
-        
-        # Check if we should merge
-        is_buffer_incomplete = buffer_text and not buffer_text.endswith(tuple(FINAL_PUNCTUATION))
-        is_current_short = len(current_text.split()) <= MERGE_WORD_THRESHOLD
-        
-        if is_buffer_incomplete and is_current_short:
-            buffer['text'] += " " + current_text
-            buffer['end'] = seg['end']
-            if 'words' in buffer and 'words' in seg:
-                buffer['words'].extend(seg.get('words', []))
+
+    # Create a continuous text string and a map from character index to word index
+    full_text = ""
+    char_to_word_map = {}
+    current_char = 0
+    for i, word_info in enumerate(all_words):
+        word = word_info['word'].strip()
+        start_char = len(full_text)
+        full_text += word + " "
+        end_char = len(full_text)
+        for char_idx in range(start_char, end_char):
+            char_to_word_map[char_idx] = i
+
+    doc = nlp(full_text)
+    final_segments = []
+
+    # Step 1: Process sentences from spaCy's default sentence segmenter
+    for sent in doc.sents:
+        if not sent.text.strip():
+            continue
+
+        # If the sentence is short enough, process it directly
+        if len(sent.text) <= max_chars:
+            add_segment_from_span(sent, all_words, char_to_word_map, final_segments)
         else:
-            merged.append(buffer)
-            buffer = seg.copy()
-    
-    merged.append(buffer)
-    
-    # Step 2: Split segments that are too long
-    final = []
-    for seg in merged:
-        if len(seg['text']) <= max_chars:
-            final.append(seg)
+            # Step 2: If a sentence is too long, apply custom splitting logic
+            split_spans = split_long_sentence(sent, max_chars)
+            for sub_span in split_spans:
+                add_segment_from_span(sub_span, all_words, char_to_word_map, final_segments)
+
+    return final_segments
+
+def add_segment_from_span(span: spacy.tokens.span.Span, all_words: List[Dict], char_map: Dict, final_segments: List):
+    """Helper function to create and add a subtitle segment from a spaCy span."""
+    start_char_idx = span.start_char
+    end_char_idx = min(span.end_char - 1, max(char_map.keys()))
+
+    start_word_idx = char_map.get(start_char_idx)
+    end_word_idx = char_map.get(end_char_idx)
+
+    if start_word_idx is None or end_word_idx is None:
+        return
+
+    sent_words = all_words[start_word_idx : end_word_idx + 1]
+    if not sent_words:
+        return
+
+    final_segments.append({
+        'text': span.text.strip(),
+        'start': sent_words[0]['start'],
+        'end': sent_words[-1]['end']
+    })
+
+def split_long_sentence(sent: spacy.tokens.span.Span, max_chars: int) -> List[spacy.tokens.span.Span]:
+    """Splits a long spaCy sentence at natural boundaries like commas or conjunctions."""
+    sub_sentences = []
+    start_token_idx = sent.start
+
+    while start_token_idx < sent.end:
+        current_len = 0
+        last_safe_split_idx = -1
+        current_token_idx = start_token_idx
+
+        while current_token_idx < sent.end:
+            token = sent.doc[current_token_idx]
+            if current_len + len(token.text_with_ws) > max_chars:
+                break
+            
+            current_len += len(token.text_with_ws)
+            
+            # Split BEFORE coordinating conjunctions for better flow
+            if (token.pos_ == 'CCONJ' or 
+                token.text.lower() in ['but', 'and', 'or', 'so']):
+                last_safe_split_idx = current_token_idx
+            # Split AFTER other connectors and punctuation
+            elif (token.text == ',' or 
+                  token.pos_ == 'SCONJ' or  # because, when, if, although
+                  token.text.lower() in ['then', 'also', 'however']):
+                last_safe_split_idx = current_token_idx + 1
+            
+            current_token_idx += 1
+
+        if last_safe_split_idx != -1 and last_safe_split_idx > start_token_idx:
+            sub_sentences.append(sent.doc[start_token_idx:last_safe_split_idx])
+            start_token_idx = last_safe_split_idx
         else:
-            # Use backward priority splitting
-            split_segments = split_with_backward_priority(seg, max_chars)
-            final.extend(split_segments)
-    
-    return final
+            end_idx = min(current_token_idx, sent.end)
+            if end_idx == start_token_idx:
+                 end_idx += 1
+            sub_sentences.append(sent.doc[start_token_idx:end_idx])
+            start_token_idx = end_idx
+            
+    return sub_sentences
 
 # --- File Saving Utilities ---
 def save_subtitles_to_srt(subs: List[srt.Subtitle], path: str):

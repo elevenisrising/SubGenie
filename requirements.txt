@@ -1,8 +1,25 @@
-openai-whisper
-deep-translator
-tqdm
-srt
-pydub
-nltk
-spacy
-requests
+# Core dependencies for SubGenie
+# Audio and video processing
+openai-whisper>=20231117
+pydub>=0.25.1
+
+# Natural language processing
+spacy>=3.7.0
+
+# Subtitle handling
+srt>=3.5.2
+
+# Translation
+deep-translator>=1.11.4
+
+# GUI framework
+customtkinter>=5.2.0
+pillow>=9.0.0
+
+# Utilities
+tqdm>=4.65.0
+requests>=2.31.0
+
+# Scientific computing (required by Whisper and audio processing)
+torch>=2.0.0
+numpy>=1.24.0

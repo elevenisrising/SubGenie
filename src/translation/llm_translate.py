@@ -37,7 +37,7 @@ import srt
 
 # Configuration
 OUTPUT_BASE_DIR = "output_subtitles"
-LLM_OUTPUT_SUBDIR = "LLM_output"
+LLM_OUTPUT_SUBDIR = "local_llm"  # Local LLM translations
 DEFAULT_MODEL = "qwen2.5:7b"  # Recommended for Chinese translation
 OLLAMA_BASE_URL = "http://localhost:11434"
 
@@ -537,7 +537,7 @@ def main():
         else:
             print(f"No processed subtitles to save for {srt_file.name}")
     
-    print(f"\n✅ LLM translation completed!")
+    print(f"\n[COMPLETED] LLM translation finished!")
     print(f"Results saved to: {llm_output_dir}")
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ import srt
 
 # Configuration
 OUTPUT_BASE_DIR = "output_subtitles"
-LLM_OUTPUT_SUBDIR = "LLM_output"
+LLM_OUTPUT_SUBDIR = "api_llm"  # Commercial API translations
 
 # API Configuration
 DEFAULT_API_KEY = "sk-u9VhdzHTG1dzEnWQTUzozkYfXhrkRpVisASUZdARQ0tORyQq"
@@ -88,7 +88,6 @@ class RelayAPIClient:
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.1,
-            "max_tokens": 4000,
             "stream": False
         }
         
@@ -191,12 +190,19 @@ Return only the corrected and translated bilingual SRT file:"""
     # Extract SRT content from response
     processed_srt = extract_srt_from_response(response)
     
+    print(f"[DEBUG] API Response length: {len(response)} chars")
+    print(f"[DEBUG] Processed SRT length: {len(processed_srt)} chars")
+    print(f"[DEBUG] First 200 chars of processed SRT: {processed_srt[:200]}")
+    
     try:
         # Parse the processed SRT
         processed_subtitles = list(srt.parse(processed_srt))
         
+        print(f"[DEBUG] Original chunk size: {len(chunk)}, Parsed subtitles: {len(processed_subtitles)}")
+        
         if len(processed_subtitles) != len(chunk):
-            print(f"Warning: Subtitle count mismatch. Original: {len(chunk)}, Processed: {len(processed_subtitles)}")
+            print(f"[WARNING] Subtitle count mismatch. Original: {len(chunk)}, Processed: {len(processed_subtitles)}")
+            print(f"[WARNING] This may indicate incomplete API response or parsing issue")
         
         # Validate and fix timing if needed
         for i, sub in enumerate(processed_subtitles):
@@ -217,15 +223,16 @@ def find_srt_files(project_dir: Path) -> List[Path]:
     """Find all SRT files in the project directory."""
     srt_files = []
     
-    # Look for individual chunk files
-    chunk_files = sorted(project_dir.glob("chunk_*.srt"))
-    if chunk_files:
-        srt_files.extend(chunk_files)
-    
-    # Look for merged file
+    # Prefer merged files first (complete video)
     merged_files = list(project_dir.glob("*_merged.srt"))
     if merged_files:
         srt_files.extend(merged_files)
+        return srt_files  # Return early if merged file exists
+    
+    # Fallback to individual chunk files if no merged file
+    chunk_files = sorted(project_dir.glob("chunk_*.srt"))
+    if chunk_files:
+        srt_files.extend(chunk_files)
     
     return srt_files
 
@@ -235,13 +242,13 @@ def test_api_connection(client: RelayAPIClient) -> bool:
     try:
         response = client.generate_response(test_prompt, "You are a helpful assistant.")
         if response and "successful" in response.lower():
-            print("✅ API connection test passed")
+            print("[SUCCESS] API connection test passed")
             return True
         else:
-            print(f"⚠️ API responded but unexpected content: {response}")
+            print(f"[WARNING] API responded but unexpected content: {response}")
             return True  # Still consider it working
     except Exception as e:
-        print(f"❌ API connection test failed: {e}")
+        print(f"[ERROR] API connection test failed: {e}")
         return False
 
 def main():
@@ -249,7 +256,7 @@ def main():
     parser.add_argument("project_name", help="Name of the project directory in output_subtitles")
     parser.add_argument("--model", default=DEFAULT_MODEL, 
                        help=f"Model to use (default: {DEFAULT_MODEL}). Available: {', '.join(SUPPORTED_MODELS)}")
-    parser.add_argument("--chunk-size", type=int, default=3, help="Number of subtitles to process in each batch (default: 3)")
+    # Note: chunk-size removed - each file is processed as one unit
     parser.add_argument("--file", help="Specific SRT file to process (default: process all SRT files)")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY, help="API key for the relay service")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Base URL for the relay API")
@@ -303,7 +310,7 @@ def main():
     
     # Process each SRT file
     for srt_file in srt_files:
-        print(f"\n📁 Processing: {srt_file.name}")
+        print(f"\n[PROCESSING] {srt_file.name}")
         
         # Load subtitles
         subtitles = load_srt_file(srt_file)
@@ -311,28 +318,14 @@ def main():
             continue
         
         print(f"Loaded {len(subtitles)} subtitles")
+        print(f"Processing entire file as one unit...")
         
-        # Split into chunks for processing
-        chunks = chunk_subtitles(subtitles, args.chunk_size)
-        print(f"Processing in {len(chunks)} chunk(s)")
+        # Process entire file as one chunk
+        processed_subtitles = process_subtitle_chunk(client, subtitles)
         
-        processed_subtitles = []
-        
-        for i, chunk in enumerate(chunks, 1):
-            print(f"🔄 Processing chunk {i}/{len(chunks)}...")
-            
-            processed_chunk = process_subtitle_chunk(client, chunk)
-            if processed_chunk is not None:
-                processed_subtitles.extend(processed_chunk)
-                print(f"✅ Chunk {i} processed successfully")
-            else:
-                print(f"❌ Failed to process chunk {i}, keeping original...")
-                # Keep original chunk if processing fails
-                processed_subtitles.extend(chunk)
-            
-            # Add delay to avoid rate limiting
-            if i < len(chunks):
-                time.sleep(1)
+        if processed_subtitles is None:
+            print(f"[ERROR] Failed to process {srt_file.name}, keeping original...")
+            processed_subtitles = subtitles
         
         # Save processed subtitles
         output_file = llm_output_dir / srt_file.name
@@ -345,8 +338,8 @@ def main():
         else:
             print(f"No processed subtitles to save for {srt_file.name}")
     
-    print(f"\n🎉 Translation completed!")
-    print(f"📂 Results saved to: {llm_output_dir}")
+    print(f"\n[COMPLETED] Translation finished!")
+    print(f"[OUTPUT] Results saved to: {llm_output_dir}")
 
 if __name__ == "__main__":
     main()
