@@ -46,23 +46,30 @@ class GUIProcessor:
             
             self.current_process = process
 
-            for line in iter(process.stdout.readline, ''):
+            # Use a while loop to read character by character for real-time output
+            buffer = ""
+            while True:
+                char = process.stdout.read(1)
+                if not char:
+                    # End of stream
+                    if buffer:
+                        log_callback(buffer)
+                    break
+
                 if self.should_stop:
                     log_callback("Termination signal received, stopping subprocess.")
                     process.terminate()
                     break
-                
-                line = line.strip()
-                if line:
-                    log_callback(line)
+
+                if char in ['\n', '\r']:
+                    if buffer:
+                        log_callback(buffer)
+                    buffer = ""
+                else:
+                    buffer += char
             
-            process.stdout.close()
             return_code = process.wait()
             
-            if self.should_stop:
-                log_callback("Process was stopped by user.")
-                return False
-
             if return_code != 0:
                 log_callback(f"Process failed with exit code {return_code}")
                 return False
@@ -146,7 +153,7 @@ class GUIProcessor:
     def run_whisper_transcription(self, file_path: str, settings: Dict[str, Any], log_callback: Callable) -> bool:
         """Run Whisper transcription using main.py."""
         cmd = [
-            sys.executable, "src/processing/main.py",
+            sys.executable, "-u", "src/processing/main.py",
             file_path,
             "--model", settings.get('model', 'medium'),
             "--target_language", settings.get('target_language', 'zh-CN'),
@@ -163,6 +170,11 @@ class GUIProcessor:
             cmd.append("--no_normalize_audio")
         if settings.get('no_denoise'):
             cmd.append("--no_denoise")
+
+        # Add parameters with values
+        cmd.extend(["--target_dbfs", str(settings.get('target_dbfs', -20.0))])
+        cmd.extend(["--noise_reduction_strength", str(settings.get('noise_reduction_strength', 0.5))])
+
         if settings.get('no_keep_preprocessed'):
             cmd.append("--no_keep_preprocessed")
         if settings.get('translate_during_detection'):

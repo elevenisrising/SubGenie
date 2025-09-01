@@ -182,7 +182,7 @@ class MainInterface:
         ctk.CTkLabel(lang_row2, text="Max Chars:").pack(side="left", padx=(20, 5))
         self.max_chars_var = tk.StringVar(value="80")
         ctk.CTkEntry(lang_row2, textvariable=self.max_chars_var, width=60).pack(side="left", padx=5)
-        
+
         # Output format
         output_frame = ctk.CTkFrame(basic_scroll)
         output_frame.pack(fill="x", padx=10, pady=10)
@@ -201,7 +201,39 @@ class MainInterface:
                           variable=self.output_format_var, value="target").pack(side="left", padx=10)
         ctk.CTkRadioButton(format_frame, text="Bilingual", 
                           variable=self.output_format_var, value="bilingual").pack(side="left", padx=10)
-    
+        
+        # Audio Settings
+        audio_frame = ctk.CTkFrame(basic_scroll)
+        audio_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(audio_frame, text="Audio Preprocessing Settings", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=10, pady=5)
+        
+        # Checkboxes
+        check_row = ctk.CTkFrame(audio_frame)
+        check_row.pack(fill="x", padx=10, pady=2)
+
+        self.no_preprocessing_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(check_row, text="Disable All Preprocessing", variable=self.no_preprocessing_var).pack(side="left", padx=10)
+        
+        self.no_normalize_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(check_row, text="Disable Normalization", variable=self.no_normalize_var).pack(side="left", padx=10)
+        
+        self.no_denoise_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(check_row, text="Disable Denoise", variable=self.no_denoise_var).pack(side="left", padx=10)
+        
+        # Parameters
+        param_row = ctk.CTkFrame(audio_frame)
+        param_row.pack(fill="x", padx=10, pady=5)
+        
+        ctk.CTkLabel(param_row, text="Target dBFS:").pack(side="left", padx=(10, 5))
+        self.target_dbfs_var = tk.StringVar(value="-20.0")
+        ctk.CTkEntry(param_row, textvariable=self.target_dbfs_var, width=60).pack(side="left", padx=5)
+
+        ctk.CTkLabel(param_row, text="Denoise Strength:").pack(side="left", padx=(20, 5))
+        self.denoise_strength_var = tk.StringVar(value="0.5")
+        ctk.CTkEntry(param_row, textvariable=self.denoise_strength_var, width=60).pack(side="left", padx=5)
+
     def create_advanced_tab(self):
         """Create advanced options tab."""
         # Create scrollable frame for advanced tab
@@ -799,7 +831,14 @@ class MainInterface:
             'custom_prompt': self.custom_prompt_text.get("1.0", "end-1c"),
             'prompt_preset': self.prompt_preset_var.get(),
             'source_directory': self.source_dir_var.get(),
-            'output_directory': self.output_dir_var.get()
+            'output_directory': self.output_dir_var.get(),
+            
+            # Audio preprocessing settings
+            'no_audio_preprocessing': self.no_preprocessing_var.get(),
+            'no_normalize_audio': self.no_normalize_var.get(),
+            'no_denoise': self.no_denoise_var.get(),
+            'target_dbfs': float(self.target_dbfs_var.get()) if self.target_dbfs_var.get() else -20.0,
+            'noise_reduction_strength': float(self.denoise_strength_var.get()) if self.denoise_strength_var.get() else 0.5,
         }
         
         # Always print API settings debug info

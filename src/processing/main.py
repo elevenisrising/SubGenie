@@ -548,19 +548,28 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
     args_hash = hashlib.md5(f"{args.source_language}_{args.max_subtitle_chars}".encode()).hexdigest()[:8]
     cache_path = get_cache_path(audio_hash, args.model, args_hash)
     
+    result = None
     if is_cache_valid(cache_path):
         logging.info(f"Loading transcription from cache: {cache_path.name}")
         result = load_from_cache(cache_path)
-    else:
+        if result is None:
+            logging.warning("Failed to load from cache, will transcribe fresh")
+    
+    if result is None:
         logging.info("Transcribing with Whisper model...")
         try:
             result = model.transcribe(
                 audio_to_transcribe,
                 language=args.source_language,
-                word_timestamps=True,
-                fp16=False
+                word_timestamps=False, # Disable for stability
+                fp16=torch.cuda.is_available(), # Use fp16 only on GPU
+                verbose=True # Show real-time transcription progress
             )
-            save_to_cache(cache_path, result)
+            if result:
+                save_to_cache(cache_path, result)
+            else:
+                logging.error("Whisper returned None result")
+                return [], len(audio) / 1000.0, preprocessed_files_to_keep
         except Exception as e:
             logging.error(f"Transcription failed: {e}")
             return [], len(audio) / 1000.0, preprocessed_files_to_keep
