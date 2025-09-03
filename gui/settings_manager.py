@@ -14,8 +14,8 @@ import logging
 class SettingsManager:
     """Manages application settings and preferences."""
     
-    def __init__(self):
-        self.settings_file = Path("settings.json")
+    def __init__(self, settings_file="settings.json"):
+        self.settings_file = Path(settings_file)
         self.default_settings = {
             "appearance": {
                 "theme": "system",  # system, dark, light
@@ -37,7 +37,7 @@ class SettingsManager:
             },
             "api_settings": {
                 "relay_api": {
-                    "base_url": "https://www.chataiapi.com/v1/chat/completions",
+                    "base_url": "",  # TODO: Add your API base URL here
                     "api_key": "",
                     "default_model": "gemini-2.5-pro"
                 },
@@ -69,7 +69,8 @@ class SettingsManager:
                 "check_updates": True
             }
         }
-        self.current_settings = self.default_settings.copy()
+        self.current_settings = {}
+        self.load_settings()
     
     def load_settings(self) -> Dict[str, Any]:
         """Load settings from file."""

@@ -180,6 +180,8 @@ class GUIProcessor:
         if settings.get('translate_during_detection'):
              cmd.append("--translate_during_detection")
 
+        cmd.append("--word_timestamps")
+
         return self._run_subprocess(cmd, log_callback)
 
     def run_translation(self, project_name: str, settings: Dict[str, Any], log_callback: Callable) -> bool:

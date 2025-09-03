@@ -545,7 +545,7 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
     
     # 2. Transcription with Caching
     audio_hash = get_audio_hash(Path(audio_to_transcribe))
-    args_hash = hashlib.md5(f"{args.source_language}_{args.max_subtitle_chars}".encode()).hexdigest()[:8]
+    args_hash = hashlib.md5(f"{args.source_language}_{args.max_subtitle_chars}_{args.word_timestamps}".encode()).hexdigest()[:8]
     cache_path = get_cache_path(audio_hash, args.model, args_hash)
     
     result = None
@@ -561,7 +561,7 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
             result = model.transcribe(
                 audio_to_transcribe,
                 language=args.source_language,
-                word_timestamps=False, # Disable for stability
+                word_timestamps=args.word_timestamps, # Disable for stability
                 fp16=torch.cuda.is_available(), # Use fp16 only on GPU
                 verbose=True # Show real-time transcription progress
             )
@@ -855,6 +855,7 @@ if __name__ == "__main__":
     # File management
     parser.add_argument("--no_keep_preprocessed", action="store_true", help="Don't keep preprocessed audio files")
     parser.add_argument("--no_save_progress", action="store_true", help="Don't save processing progress")
+    parser.add_argument("--word_timestamps", action="store_true", help="Enable word-level timestamps for spaCy segmentation")
     
     args = parser.parse_args()
     run_main_workflow(args)

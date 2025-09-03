@@ -27,8 +27,10 @@ OUTPUT_BASE_DIR = "output_subtitles"
 LLM_OUTPUT_SUBDIR = "api_llm"  # Commercial API translations
 
 # API Configuration
-DEFAULT_API_KEY = "sk-u9VhdzHTG1dzEnWQTUzozkYfXhrkRpVisASUZdARQ0tORyQq"
-DEFAULT_BASE_URL = "https://www.chataiapi.com/v1/chat/completions"
+# DEFAULT_API_KEY = "your-api-key-here"  # TODO: Add your API key here
+DEFAULT_API_KEY = ""
+# DEFAULT_BASE_URL = "https://your-api-provider.com/v1/chat/completions"  # TODO: Add your API base URL here
+DEFAULT_BASE_URL = ""
 DEFAULT_MODEL = "gemini-2.5-pro"  # Default Gemini model
 
 # List of supported models (DeepSeek and Gemini only)
