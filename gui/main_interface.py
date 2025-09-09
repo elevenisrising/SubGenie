@@ -223,6 +223,10 @@ class MainInterface:
         self.merge_tab = self.tabview.add(self.lang.get_string("tab_merge"))
         self.create_merge_tab(self.merge_tab)
 
+        # Extract Audio Tab
+        self.extract_audio_tab = self.tabview.add(self.lang.get_string("extract_audio_tab"))
+        self.create_extract_audio_tab(self.extract_audio_tab)
+
     def create_language_switcher(self):
         """Language switcher is now created in the file list title area."""  
         pass
@@ -1504,3 +1508,242 @@ class MainInterface:
             print(f"Status Update Error: Missing key {e} in kwargs for template '{message_template}'")
             self.status_var.set(message_template) # Fallback to template
         self.app.update_idletasks()
+
+    def create_extract_audio_tab(self, tab):
+        """Create audio extraction tab."""
+        extract_scroll = ctk.CTkScrollableFrame(tab)
+        extract_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Title
+        extract_title_label = ctk.CTkLabel(extract_scroll, text=self.lang.get_string("extract_audio_title"), 
+                    font=ctk.CTkFont(size=18, weight="bold"))
+        extract_title_label.pack(pady=20)
+        self.store_translatable_component(extract_title_label, "extract_audio_title")
+        
+        # File selection area
+        file_section = ctk.CTkFrame(extract_scroll)
+        file_section.pack(fill="x", padx=20, pady=10)
+        
+        # Video files label
+        video_files_label = ctk.CTkLabel(file_section, text=self.lang.get_string("select_video_files"), 
+                                       font=ctk.CTkFont(size=14, weight="bold"))
+        video_files_label.pack(anchor="w", padx=10, pady=(10, 5))
+        self.store_translatable_component(video_files_label, "select_video_files")
+        
+        # Video file list with drag & drop area
+        video_list_frame = ctk.CTkFrame(file_section)
+        video_list_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Drag & drop placeholder
+        self.video_drop_label = ctk.CTkLabel(video_list_frame, 
+                                           text=self.lang.get_string("drag_drop_videos"),
+                                           font=ctk.CTkFont(size=12),
+                                           text_color="gray")
+        self.video_drop_label.pack(pady=20)
+        self.store_translatable_component(self.video_drop_label, "drag_drop_videos")
+        
+        # Video files listbox (initially hidden)
+        self.video_listbox = tk.Listbox(video_list_frame, height=6)
+        self.extract_video_files = []
+        
+        # File operation buttons
+        btn_frame = ctk.CTkFrame(file_section)
+        btn_frame.pack(fill="x", padx=10, pady=5)
+        
+        add_videos_btn = ctk.CTkButton(btn_frame, text="📁 Add Videos", 
+                                     command=self.add_video_files, width=120, height=32)
+        add_videos_btn.pack(side="left", padx=5)
+        
+        clear_videos_btn = ctk.CTkButton(btn_frame, text="🗑️ Clear", 
+                                       command=self.clear_video_files, width=80, height=32)
+        clear_videos_btn.pack(side="left", padx=5)
+        
+        # Settings section
+        settings_section = ctk.CTkFrame(extract_scroll)
+        settings_section.pack(fill="x", padx=20, pady=10)
+        
+        # Format selection
+        format_frame = ctk.CTkFrame(settings_section)
+        format_frame.pack(fill="x", padx=10, pady=10)
+        
+        format_label = ctk.CTkLabel(format_frame, text=self.lang.get_string("output_audio_format"), 
+                                  font=ctk.CTkFont(size=12, weight="bold"))
+        format_label.pack(side="left", padx=10)
+        self.store_translatable_component(format_label, "output_audio_format")
+        
+        self.audio_format_var = tk.StringVar(value="wav")
+        format_combo = ctk.CTkComboBox(format_frame, variable=self.audio_format_var,
+                                     values=["wav", "mp3", "m4a", "flac"], width=100)
+        format_combo.pack(side="left", padx=10)
+        
+        # Quality selection
+        quality_label = ctk.CTkLabel(format_frame, text=self.lang.get_string("audio_quality"), 
+                                   font=ctk.CTkFont(size=12, weight="bold"))
+        quality_label.pack(side="left", padx=(20, 5))
+        self.store_translatable_component(quality_label, "audio_quality")
+        
+        self.audio_quality_var = tk.StringVar(value="medium")
+        quality_combo = ctk.CTkComboBox(format_frame, variable=self.audio_quality_var,
+                                      values=["low", "medium", "high"], width=100)
+        quality_combo.pack(side="left", padx=5)
+        
+        # Output directory
+        output_frame = ctk.CTkFrame(settings_section)
+        output_frame.pack(fill="x", padx=10, pady=5)
+        
+        output_label = ctk.CTkLabel(output_frame, text=self.lang.get_string("output_directory_label"), 
+                                  font=ctk.CTkFont(size=12, weight="bold"))
+        output_label.pack(side="left", padx=10)
+        self.store_translatable_component(output_label, "output_directory_label")
+        
+        # Default to extracted_audio directory
+        import os
+        default_audio_output = os.path.join(os.getcwd(), "extracted_audio")
+        self.audio_output_var = tk.StringVar(value=default_audio_output)
+        
+        output_entry = ctk.CTkEntry(output_frame, textvariable=self.audio_output_var, width=300)
+        output_entry.pack(side="left", padx=5, fill="x", expand=True)
+        
+        browse_output_btn = ctk.CTkButton(output_frame, text=self.lang.get_string("browse_btn"), 
+                                        command=self.browse_audio_output, width=80, height=32)
+        browse_output_btn.pack(side="right", padx=10)
+        self.store_translatable_component(browse_output_btn, "browse_btn")
+        
+        # Extract button and status
+        action_section = ctk.CTkFrame(extract_scroll)
+        action_section.pack(fill="x", padx=20, pady=20)
+        
+        # Extract button
+        self.extract_btn = ctk.CTkButton(action_section, text=self.lang.get_string("extract_audio_btn"),
+                                       command=self.start_audio_extraction,
+                                       font=ctk.CTkFont(size=14, weight="bold"),
+                                       height=40, width=200)
+        self.extract_btn.pack(pady=10)
+        self.store_translatable_component(self.extract_btn, "extract_audio_btn")
+        
+        # Status label
+        self.extraction_status_var = tk.StringVar(value=self.lang.get_string("extraction_status"))
+        status_label = ctk.CTkLabel(action_section, textvariable=self.extraction_status_var,
+                                  font=ctk.CTkFont(size=12))
+        status_label.pack(pady=5)
+        
+        # Progress bar
+        self.extraction_progress = ctk.CTkProgressBar(action_section, width=400)
+        self.extraction_progress.pack(pady=5)
+        self.extraction_progress.set(0)
+
+    def add_video_files(self):
+        """Add video files for audio extraction."""
+        filetypes = [
+            ("Video Files", "*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm *.m4v"),
+            ("All Files", "*.*")
+        ]
+        
+        files = filedialog.askopenfilenames(title="Select Video Files", filetypes=filetypes)
+        
+        if files:
+            # Hide placeholder text and show listbox
+            if not self.extract_video_files:
+                self.video_drop_label.pack_forget()
+                self.video_listbox.pack(fill="x", padx=10, pady=5)
+            
+            # Add files to list
+            for file in files:
+                if file not in self.extract_video_files:
+                    self.extract_video_files.append(file)
+                    self.video_listbox.insert("end", os.path.basename(file))
+            
+            self.update_extraction_status()
+
+    def clear_video_files(self):
+        """Clear video files list."""
+        self.extract_video_files.clear()
+        self.video_listbox.delete(0, "end")
+        
+        # Hide listbox and show placeholder
+        self.video_listbox.pack_forget()
+        self.video_drop_label.pack(pady=20)
+        
+        self.update_extraction_status()
+
+    def browse_audio_output(self):
+        """Browse for audio output directory."""
+        directory = filedialog.askdirectory(title="Select Output Directory")
+        if directory:
+            self.audio_output_var.set(directory)
+
+    def update_extraction_status(self):
+        """Update extraction status message."""
+        if self.extract_video_files:
+            self.extraction_status_var.set(f"Ready to extract from {len(self.extract_video_files)} video(s)")
+        else:
+            self.extraction_status_var.set(self.lang.get_string("extraction_status"))
+
+    def start_audio_extraction(self):
+        """Start audio extraction process."""
+        if not self.extract_video_files:
+            messagebox.showwarning("No Files", "Please select video files to extract audio from.")
+            return
+        
+        # Create output directory if it doesn't exist
+        output_dir = self.audio_output_var.get()
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Start extraction in background thread
+        self.extract_btn.configure(state="disabled", text="🔄 Extracting...")
+        self.extraction_progress.set(0)
+        
+        # Start extraction thread
+        import threading
+        extraction_thread = threading.Thread(target=self._extract_audio_thread)
+        extraction_thread.daemon = True
+        extraction_thread.start()
+
+    def _extract_audio_thread(self):
+        """Background thread for audio extraction."""
+        try:
+            from core.audio_extractor import AudioExtractor
+            extractor = AudioExtractor()
+            
+            total_files = len(self.extract_video_files)
+            output_dir = self.audio_output_var.get()
+            audio_format = self.audio_format_var.get()
+            quality = self.audio_quality_var.get()
+            
+            for i, video_file in enumerate(self.extract_video_files):
+                self.app.after(0, self._update_progress, i, total_files, os.path.basename(video_file))
+                
+                # Extract audio
+                extractor.extract_single_file(video_file, output_dir, audio_format, quality)
+                
+                # Update progress
+                progress = (i + 1) / total_files
+                self.app.after(0, self.extraction_progress.set, progress)
+            
+            # Extraction complete
+            self.app.after(0, self._extraction_complete)
+            
+        except Exception as e:
+            self.app.after(0, self._extraction_error, str(e))
+
+    def _update_progress(self, current, total, filename):
+        """Update progress status."""
+        self.extraction_status_var.set(f"Extracting ({current+1}/{total}): {filename}")
+
+    def _extraction_complete(self):
+        """Handle extraction completion."""
+        self.extract_btn.configure(state="normal", text=self.lang.get_string("extract_audio_btn"))
+        self.extraction_status_var.set(f"✅ Extracted {len(self.extract_video_files)} audio file(s) successfully!")
+        self.extraction_progress.set(1.0)
+        
+        # Show success message
+        messagebox.showinfo("Success", f"Successfully extracted audio from {len(self.extract_video_files)} video file(s)!")
+
+    def _extraction_error(self, error_msg):
+        """Handle extraction error."""
+        self.extract_btn.configure(state="normal", text=self.lang.get_string("extract_audio_btn"))
+        self.extraction_status_var.set("❌ Extraction failed!")
+        self.extraction_progress.set(0)
+        
+        # Show error message
+        messagebox.showerror("Extraction Failed", f"Audio extraction failed:\n{error_msg}")

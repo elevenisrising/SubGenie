@@ -249,48 +249,312 @@ def split_long_sentence(sentence: str, max_chars: int, whisper_data: Dict) -> Li
 
 def try_split_at_whisper_boundaries(sentence: str, max_chars: int, whisper_data: Dict) -> List[str]:
     """Try to split at Whisper original segment boundaries"""
-    # Simplified version: return original sentence, can implement Whisper boundary logic later
-    # TODO: Implement Whisper boundary detection and splitting
+    
+    segment_boundaries = whisper_data.get('segment_boundaries', [])
+    all_words = whisper_data.get('all_words', [])
+    
+    if not segment_boundaries or not all_words:
+        return [sentence]
+    
+    # Step 1: Find which Whisper segments our sentence spans across
+    sentence_words = extract_normalized_words(sentence)
+    if not sentence_words:
+        return [sentence]
+    
+    # Step 2: Find the word range in all_words that matches our sentence
+    sentence_start_idx, sentence_end_idx = find_sentence_word_range(sentence_words, all_words)
+    
+    if sentence_start_idx == -1 or sentence_end_idx == -1:
+        logging.debug("Could not match sentence to Whisper words for boundary splitting")
+        return [sentence]
+    
+    # Step 3: Find Whisper segment boundaries within our sentence
+    internal_boundaries = []
+    
+    for boundary in segment_boundaries:
+        boundary_start = boundary['start_word_idx']
+        boundary_end = boundary['end_word_idx']
+        
+        # Check if this boundary is inside our sentence (not at the edges)
+        if sentence_start_idx < boundary_start <= sentence_end_idx:
+            # This is a boundary inside our sentence
+            internal_boundaries.append(boundary_start)
+    
+    if not internal_boundaries:
+        return [sentence]
+    
+    # Step 4: Try to split at these boundaries
+    logging.info(f"Found {len(internal_boundaries)} Whisper boundaries within sentence")
+    
+    # Convert word indices back to text positions
+    splits = []
+    current_word_idx = sentence_start_idx
+    
+    for boundary_word_idx in sorted(internal_boundaries):
+        # Get text from current position to boundary
+        part_words = []
+        for i in range(current_word_idx, boundary_word_idx):
+            if i < len(all_words):
+                word = all_words[i].get('word', '').strip()
+                if word:
+                    part_words.append(word)
+        
+        if part_words:
+            part_text = " ".join(part_words).strip()
+            if len(part_text) >= 15 and len(part_text) <= max_chars:  # Valid part
+                splits.append(part_text)
+                current_word_idx = boundary_word_idx
+            else:
+                # Part is too short or too long, merge with previous
+                if splits and len(part_text) < max_chars:
+                    # Merge with last split
+                    splits[-1] = (splits[-1] + " " + part_text).strip()
+                else:
+                    # Can't merge, abandon this splitting strategy
+                    return [sentence]
+    
+    # Add remaining part
+    if current_word_idx <= sentence_end_idx:
+        remaining_words = []
+        for i in range(current_word_idx, sentence_end_idx + 1):
+            if i < len(all_words):
+                word = all_words[i].get('word', '').strip()
+                if word:
+                    remaining_words.append(word)
+        
+        if remaining_words:
+            remaining_text = " ".join(remaining_words).strip()
+            if len(remaining_text) >= 15:
+                if len(remaining_text) <= max_chars:
+                    splits.append(remaining_text)
+                elif splits:  # Merge with last split if possible
+                    combined = (splits[-1] + " " + remaining_text).strip()
+                    if len(combined) <= max_chars:
+                        splits[-1] = combined
+                    else:
+                        return [sentence]  # Can't merge, abandon
+                else:
+                    return [sentence]  # No previous splits to merge with
+    
+    # Validate final splits
+    if len(splits) > 1 and all(len(part) <= max_chars for part in splits):
+        logging.info(f"Successfully split using Whisper boundaries: {len(splits)} parts")
+        return splits
+    
     return [sentence]
 
 
-def try_split_at_grammar_points(sentence: str, max_chars: int) -> List[str]:
-    """Split at grammar points: conjunctions, commas, semicolons etc"""
+def find_sentence_word_range(sentence_words: List[str], all_words: List[Dict]) -> tuple:
+    """Find the start and end word indices in all_words that match our sentence"""
     
-    # Define split points (by priority)
-    split_patterns = [
+    if not sentence_words or not all_words:
+        return -1, -1
+    
+    # Normalize all_words for matching
+    all_words_normalized = []
+    for word_info in all_words:
+        word = word_info.get('word', '').strip()
+        if word:
+            all_words_normalized.append(normalize_word(word))
+    
+    # Use sliding window to find the best match
+    sentence_len = len(sentence_words)
+    best_start = -1
+    best_score = 0
+    
+    for start_idx in range(len(all_words_normalized) - sentence_len + 1):
+        # Calculate match score for this window
+        matches = 0
+        for i in range(sentence_len):
+            if start_idx + i < len(all_words_normalized):
+                if sentence_words[i] == all_words_normalized[start_idx + i]:
+                    matches += 1
+                elif sentence_words[i] in all_words_normalized[start_idx + i] or \
+                     all_words_normalized[start_idx + i] in sentence_words[i]:
+                    matches += 0.8  # Partial match
+        
+        match_score = matches / sentence_len
+        if match_score > best_score and match_score >= 0.7:  # Require at least 70% match
+            best_score = match_score
+            best_start = start_idx
+    
+    if best_start >= 0:
+        return best_start, best_start + sentence_len - 1
+    
+    return -1, -1
+
+
+def try_split_at_grammar_points(sentence: str, max_chars: int) -> List[str]:
+    """Split at grammar points with protection for important phrases"""
+    
+    # Step 1: Check for protected phrases that should NOT be split
+    if has_protected_phrases(sentence):
+        # Try to find split points that avoid breaking protected phrases
+        safe_splits = find_safe_split_points(sentence, max_chars)
+        if safe_splits:
+            return safe_splits
+    
+    # Step 2: Try natural break points first (口语停顿, 自然停顿)
+    natural_break_patterns = [
+        r'\b(you know|I mean|like|well|okay|alright|actually|basically)\b',  # 口语停顿词
+        r'\b(and then|but then|so then|after that|next|later|meanwhile|finally)\b',  # 时间连接词
+        r'\b(if I|when I|because I|so I|then I|now I)\b',                   # 人称转换点
+        r'(\. |! |\? )',                                                     # 句号后空格
+    ]
+    
+    for pattern in natural_break_patterns:
+        splits = try_pattern_split(sentence, pattern, max_chars, min_length=15)
+        if len(splits) > 1:
+            logging.info(f"Using natural break: {pattern}")
+            return splits
+    
+    # Step 3: Traditional grammar points (原有逻辑，但改进了)
+    grammar_patterns = [
         r'\b(and|but|or|so|because|since|while|although|however|therefore|meanwhile)\b',
         r'[,;:]',
         r'\.',
     ]
     
-    for pattern in split_patterns:
-        matches = list(re.finditer(pattern, sentence, re.IGNORECASE))
-        
-        if matches:
-            splits = []
-            last_pos = 0
+    for pattern in grammar_patterns:
+        splits = try_pattern_split(sentence, pattern, max_chars, min_length=20)
+        if len(splits) > 1:
+            logging.info(f"Using grammar point: {pattern}")
+            return splits
+    
+    return [sentence]
+
+
+def has_protected_phrases(sentence: str) -> bool:
+    """Check if sentence contains phrases that should not be split"""
+    protected_patterns = [
+        r'\bin the \w+',           # "in the crafting bench"
+        r'\bon the \w+',           # "on the pillar"  
+        r'\bat the \w+',           # "at the fortress"
+        r'\bto the \w+',           # "to the end"
+        r'\bfrom the \w+',         # "from the nether"
+        r'\w+ or \w+',             # "this or that"
+        r'\bif I \w+',             # "if I had"
+        r'\bI would \w+',          # "I would have"
+        r'\bI could \w+',          # "I could have"
+        r'\bhe would \w+',         # "he would have"
+        r'\bthat would \w+',       # "that would have been"
+        r'\bit would \w+',         # "it would be"
+        r'\bone and a half\b',     # "one and a half"
+        r'\btwo and a half\b',     # "two and a half"
+        r'\bMLG water\b',          # "MLG water bucket"
+    ]
+    
+    for pattern in protected_patterns:
+        if re.search(pattern, sentence, re.IGNORECASE):
+            return True
+    return False
+
+
+def find_safe_split_points(sentence: str, max_chars: int) -> List[str]:
+    """Find split points that avoid breaking protected phrases"""
+    # Get all protected phrase positions
+    protected_ranges = []
+    protected_patterns = [
+        r'\bin the \w+',
+        r'\bon the \w+', 
+        r'\bat the \w+',
+        r'\bto the \w+',
+        r'\bfrom the \w+',
+        r'\w+ or \w+',
+        r'\bif I \w+',
+        r'\bI would \w+',
+        r'\bI could \w+',
+        r'\bhe would \w+',
+        r'\bthat would \w+',
+        r'\bit would \w+',
+        r'\bone and a half\b',
+        r'\btwo and a half\b',
+        r'\bMLG water\b',
+    ]
+    
+    for pattern in protected_patterns:
+        for match in re.finditer(pattern, sentence, re.IGNORECASE):
+            protected_ranges.append((match.start(), match.end()))
+    
+    # Find safe split points (outside protected ranges)
+    safe_split_patterns = [
+        r'\b(and then|but then|so then)\b',
+        r'\b(you know|I mean|actually|basically)\b',
+        r'[,;] ',  # Punctuation with space
+    ]
+    
+    for pattern in safe_split_patterns:
+        for match in re.finditer(pattern, sentence, re.IGNORECASE):
+            split_pos = match.end()
             
-            for match in matches:
-                split_pos = match.end()  # Split after the match
-                part = sentence[last_pos:split_pos].strip()
+            # Check if split position is safe (not inside protected phrase)
+            is_safe = True
+            for start, end in protected_ranges:
+                if start <= split_pos <= end:
+                    is_safe = False
+                    break
+            
+            if is_safe:
+                # Try splitting at this position
+                left = sentence[:split_pos].strip()
+                right = sentence[split_pos:].strip()
                 
-                if len(part) >= 20:  # Avoid too short fragments
-                    if len(part) <= max_chars:
-                        splits.append(part)
-                        last_pos = split_pos
-                    else:
-                        break  # This strategy doesn't work
-            
-            # Add remaining part
-            if last_pos < len(sentence):
-                remaining = sentence[last_pos:].strip()
-                if remaining:
-                    splits.append(remaining)
-            
-            # Check all parts meet length requirements
-            if len(splits) > 1 and all(len(part) <= max_chars for part in splits):
-                return splits
+                if len(left) >= 15 and len(right) >= 15:
+                    if len(left) <= max_chars and len(right) <= max_chars:
+                        return [left, right]
+    
+    return []
+
+
+def try_pattern_split(sentence: str, pattern: str, max_chars: int, min_length: int = 20) -> List[str]:
+    """Try to split sentence at pattern matches with improved logic"""
+    matches = list(re.finditer(pattern, sentence, re.IGNORECASE))
+    
+    if not matches:
+        return [sentence]
+    
+    # Find the best split position (closest to middle)
+    target_pos = len(sentence) // 2
+    best_match = None
+    best_distance = float('inf')
+    
+    for match in matches:
+        split_pos = match.end()
+        left = sentence[:split_pos].strip()
+        right = sentence[split_pos:].strip()
+        
+        # Check length requirements
+        if len(left) >= min_length and len(right) >= min_length:
+            if len(left) <= max_chars and len(right) <= max_chars:
+                # Prefer splits closer to middle
+                distance = abs(split_pos - target_pos)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_match = match
+    
+    if best_match:
+        split_pos = best_match.end()
+        left = sentence[:split_pos].strip()
+        right = sentence[split_pos:].strip()
+        
+        # Recursively handle still-too-long parts
+        result = []
+        
+        if len(left) <= max_chars:
+            result.append(left)
+        else:
+            # Recursively split the left part
+            left_splits = try_pattern_split(left, pattern, max_chars, min_length)
+            result.extend(left_splits)
+        
+        if len(right) <= max_chars:
+            result.append(right)
+        else:
+            # Recursively split the right part
+            right_splits = try_pattern_split(right, pattern, max_chars, min_length)
+            result.extend(right_splits)
+        
+        return result
     
     return [sentence]
 

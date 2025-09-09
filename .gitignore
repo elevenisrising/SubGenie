@@ -32,9 +32,12 @@ __pycache__/
 # Input and Output directories
 input_audio/
 output_subtitles/
+extracted_audio/
 
 # IDE and OS specific files
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+CLAUDE.md

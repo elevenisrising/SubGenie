@@ -2006,6 +2006,158 @@ def save_subtitles_to_json(subs: List[srt.Subtitle], path: str):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# --- Whisper Anomaly Detection and Retry ---
+def check_and_retry_transcription(result, model, audio_path, args, chunk_name, audio_segment):
+    """Check transcription result for anomalies and retry if needed."""
+    
+    if not result or not isinstance(result, dict) or 'segments' not in result:
+        return result
+    
+    segments = result['segments']
+    if not segments:
+        return result
+    
+    # Detect anomalies
+    anomalies = detect_transcription_anomalies(segments, chunk_name)
+    
+    if not anomalies:
+        logging.info(f"✅ {chunk_name}: Transcription looks good, no anomalies detected")
+        return result
+    
+    logging.warning(f"⚠️ {chunk_name}: Detected transcription anomalies: {', '.join(anomalies)}")
+    
+    # Retry transcription with different parameters
+    retry_count = 0
+    max_retries = 2
+    
+    while retry_count < max_retries:
+        retry_count += 1
+        logging.info(f"🔄 {chunk_name}: Retry attempt {retry_count}/{max_retries}")
+        
+        # Try different Whisper parameters
+        retry_params = get_retry_parameters(retry_count, args)
+        
+        try:
+            retry_result = model.transcribe(
+                audio_path,
+                language=args.source_language,
+                word_timestamps=args.word_timestamps,
+                fp16=torch.cuda.is_available(),
+                verbose=False,  # Less verbose for retries
+                **retry_params
+            )
+            
+            if retry_result and 'segments' in retry_result:
+                retry_anomalies = detect_transcription_anomalies(retry_result['segments'], chunk_name)
+                
+                if len(retry_anomalies) < len(anomalies):
+                    logging.info(f"✅ {chunk_name}: Retry {retry_count} improved quality (anomalies: {len(anomalies)} -> {len(retry_anomalies)})")
+                    return retry_result
+                else:
+                    logging.info(f"⚠️ {chunk_name}: Retry {retry_count} didn't improve quality")
+            
+        except Exception as e:
+            logging.error(f"❌ {chunk_name}: Retry {retry_count} failed: {e}")
+    
+    logging.warning(f"⚠️ {chunk_name}: All retries exhausted, using original result with anomalies")
+    return result
+
+
+def detect_transcription_anomalies(segments, chunk_name):
+    """Detect various transcription anomalies."""
+    anomalies = []
+    
+    if not segments:
+        return anomalies
+    
+    # 1. Check for repeated segments
+    repeated_count = 0
+    for i in range(1, len(segments)):
+        current_text = segments[i].get('text', '').strip()
+        prev_text = segments[i-1].get('text', '').strip()
+        
+        if current_text and prev_text and current_text == prev_text:
+            repeated_count += 1
+    
+    if repeated_count > 1:  # More than 1 repeat is suspicious
+        anomalies.append(f"repeated_segments({repeated_count})")
+    
+    # 2. Check for abnormal segment durations
+    long_segments = 0
+    zero_duration_segments = 0
+    
+    for seg in segments:
+        start = seg.get('start', 0)
+        end = seg.get('end', 0)
+        duration = end - start
+        
+        if duration > 15:  # Segment longer than 15 seconds
+            long_segments += 1
+        elif duration <= 0:  # Zero or negative duration
+            zero_duration_segments += 1
+    
+    if long_segments > 0:
+        anomalies.append(f"long_segments({long_segments})")
+    if zero_duration_segments > 0:
+        anomalies.append(f"zero_duration({zero_duration_segments})")
+    
+    # 3. Check for fragmented content (too many short segments)
+    short_segments = 0
+    single_char_segments = 0
+    
+    for seg in segments:
+        text = seg.get('text', '').strip()
+        if len(text) <= 3:  # Very short text
+            short_segments += 1
+            if len(text) == 1:
+                single_char_segments += 1
+    
+    # If more than 30% of segments are very short, it's suspicious
+    if len(segments) > 5 and short_segments / len(segments) > 0.3:
+        anomalies.append(f"fragmented({short_segments}/{len(segments)})")
+    
+    if single_char_segments > 2:
+        anomalies.append(f"single_chars({single_char_segments})")
+    
+    # 4. Check for timestamp overlaps
+    overlaps = 0
+    for i in range(1, len(segments)):
+        prev_end = segments[i-1].get('end', 0)
+        curr_start = segments[i].get('start', 0)
+        
+        if curr_start < prev_end:  # Overlap detected
+            overlaps += 1
+    
+    if overlaps > 0:
+        anomalies.append(f"overlaps({overlaps})")
+    
+    return anomalies
+
+
+def get_retry_parameters(retry_count, original_args):
+    """Get different parameters for retry attempts."""
+    
+    if retry_count == 1:
+        # First retry: Increase temperature and beam size for more diversity
+        return {
+            'temperature': 0.2,  # Default is 0, higher = more creative
+            'beam_size': 3,      # Default is None, higher = more thorough
+            'no_speech_threshold': 0.8,  # More lenient than original 1.0
+            'logprob_threshold': -1.5     # More lenient than original -2.0
+        }
+    elif retry_count == 2:
+        # Second retry: Different strategy - more conservative
+        return {
+            'temperature': 0.0,   # More deterministic
+            'beam_size': 1,       # Faster, more focused
+            'no_speech_threshold': 0.6,   # Even more lenient
+            'logprob_threshold': -1.0,     # Most lenient
+            'compression_ratio_threshold': 1.5  # Allow more repetition
+        }
+    else:
+        return {}
+
+
 # --- Progress Management ---
 def save_progress(output_dir: Path, processed_chunks: List[int], all_subs: List[srt.Subtitle]):
     """Save processing progress."""
@@ -2124,6 +2276,10 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
                             logging.info(f"🔍 {chunk_name} DEBUG: Segment {i} has {len(seg['words'])} words")
                         else:
                             logging.info(f"🔍 {chunk_name} DEBUG: Segment {i} has NO WORDS")
+                # Check for transcription anomalies and retry if needed
+                result = check_and_retry_transcription(
+                    result, model, audio_to_transcribe, args, chunk_name, audio
+                )
                 save_to_cache(cache_path, result)
             else:
                 # This is the critical failure point for chunk_1
