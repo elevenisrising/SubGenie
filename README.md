@@ -4,12 +4,15 @@ SubGenie is a desktop application for generating, translating, and refining subt
 
 ## Features
 
-- **Transcription**: Uses OpenAI's Whisper models (tiny to large-v3).
+- **Transcription**: Uses OpenAI's Whisper models (tiny to large-v3) with word-level timestamps.
+- **Smart Segmentation**: Advanced spaCy-based grammar segmentation for natural sentence boundaries.
 - **Translation**: Supports local LLMs via Ollama, commercial APIs (e.g., DeepSeek, Gemini), and a basic free translation mode.
-- **GUI**: A graphical user interface built with CustomTkinter.
-- **Output Formats**: Supports SRT, VTT, ASS, TXT, and JSON.
-- **Project Management**: Organizes files into project folders.
+- **GUI**: A graphical user interface built with CustomTkinter with real-time processing logs.
+- **Output Formats**: Supports SRT, VTT, ASS, TXT, and JSON formats.
+- **Project Management**: Organizes files into project folders with chunk-based processing.
 - **Audio Preprocessing**: Includes options for volume normalization and noise reduction.
+- **Robust Timestamp Matching**: Sliding window algorithm for precise word-to-sentence timestamp alignment.
+- **Flexible Processing**: Parallel chunk processing with error recovery and reprocessing capabilities.
 - **Glossary**: Allows custom translation rules via `src/utils/glossary.json`.
 
 ## Installation Guide
@@ -49,8 +52,8 @@ SubGenie is a desktop application for generating, translating, and refining subt
     pip install -r requirements.txt
     ```
 
-4.  **Download the NLP model:**
-    This is required for sentence segmentation.
+4.  **Download the spaCy NLP model:**
+    This is required for advanced grammar-based sentence segmentation.
     ```bash
     python -m spacy download en_core_web_sm
     ```
@@ -67,7 +70,8 @@ SubGenie is a desktop application for generating, translating, and refining subt
 1.  **Add Files**: Drag and drop files onto the application or use the "Add Files" / "Add Folder" buttons.
 2.  **Configure**:
     -   **Whisper Model**: Select the model size (e.g., `medium`, `large`). Larger models are more accurate but slower.
-    -   **Language**: Set the source language or leave as auto-detect.
+    -   **Language**: Set the source language or leave as auto-detect. Target language defaults to "none" (no translation).
+    -   **Segmentation**: Choose between "spaCy Grammar" (recommended) or "Whisper Segments".
     -   **Output**: Choose the output format (e.g., `source`, `bilingual`).
 3.  **Process**: Click "Start Processing". Progress and logs will be displayed in the text area at the bottom.
 4.  **Output**: The generated subtitle files will be located in the `output_subtitles/` directory, organized by project name.
@@ -112,12 +116,15 @@ SubGenie 是一款桌面应用程序，用于生成、翻译和优化音频和�
 
 ## 功能特性
 
-- **语音转录**: 使用OpenAI的Whisper模型（从`tiny`到`large-v3`）。
+- **语音转录**: 使用OpenAI的Whisper模型（从`tiny`到`large-v3`）进行词级时间戳转录。
+- **智能分句**: 基于spaCy语法的高级分句技术，生成自然的句子边界。
 - **字幕翻译**: 支持通过Ollama运行的本地大语言模型、商业API（例如DeepSeek、Gemini）以及免费的谷歌翻译。
-- **图形界面**: 基于CustomTkinter构建的图形用户界面。
+- **图形界面**: 基于CustomTkinter构建的图形用户界面，支持实时处理日志。
 - **输出格式**: 支持SRT、VTT、ASS、TXT和JSON格式。
-- **项目管理**: 将每个任务的文件整理到单独的项目文件夹中。
+- **项目管理**: 将每个任务的文件整理到单独的项目文件夹中，支持分块处理。
 - **音频预处理**: 提供音量标准化和降噪等选项。
+- **精确时间戳匹配**: 使用滑动窗口算法实现精确的词句时间戳对齐。
+- **灵活处理**: 支持并行分块处理，具备错误恢复和重处理能力。
 - **术语表**: 允许通过`src/utils/glossary.json`文件自定义翻译规则。
 
 ## 安装指南
@@ -157,8 +164,8 @@ SubGenie 是一款桌面应用程序，用于生成、翻译和优化音频和�
     pip install -r requirements.txt
     ```
 
-4.  **下载NLP模型:**
-    此模型为句子分割所必需。
+4.  **下载spaCy NLP模型:**
+    此模型为高级语法分句所必需。
     ```bash
     python -m spacy download en_core_web_sm
     ```
@@ -175,7 +182,8 @@ SubGenie 是一款桌面应用程序，用于生成、翻译和优化音频和�
 1.  **添加文件**: 将文件拖放到应用程序中，或使用“添加文件”/“添加文件夹”按钮。
 2.  **配置**:
     -   **Whisper模型**: 选择模型大小（例如`medium`, `large`）。模型越大，准确率越高，但速度越慢。
-    -   **语言**: 设置源语言，或保留为自动检测。
+    -   **语言**: 设置源语言，或保留为自动检测。目标语言默认为"none"（不翻译）。
+    -   **分句策略**: 选择"spaCy Grammar"（推荐）或"Whisper Segments"。
     -   **输出**: 选择输出格式（例如`source` - 仅源语言, `bilingual` - 双语）。
 3.  **处理**: 点击“开始处理”。处理进度和日志将显示在底部的文本区域。
 4.  **输出**: 生成的字幕文件将位于`output_subtitles/`目录中，按项目名称分类。
