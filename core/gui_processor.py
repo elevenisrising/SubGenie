@@ -26,9 +26,16 @@ class GUIProcessor:
         self.processing_thread = None
 
     def _run_subprocess(self, cmd: List[str], log_callback: Callable) -> bool:
-        """Generic method to run a subprocess and stream its output."""
+        """Generic method to run a subprocess and stream its output with improved error handling."""
         try:
-            log_callback(f"Running command: {' '.join(cmd)}")
+            # Sanitize command for logging (hide sensitive info)
+            safe_cmd = []
+            for i, arg in enumerate(cmd):
+                if i > 0 and cmd[i-1] in ['--api-key', '--base-url'] and len(arg) > 10:
+                    safe_cmd.append(arg[:6] + '***')
+                else:
+                    safe_cmd.append(arg)
+            log_callback(f"Running command: {' '.join(safe_cmd)}")
             
             project_root = Path(__file__).parent.parent
             
@@ -45,25 +52,41 @@ class GUIProcessor:
             )
             
             self.current_process = process
-
-            # Use a while loop to read character by character for real-time output
+            
+            # Improved real-time output streaming with better buffering
             buffer = ""
+            error_buffer = []
+            success_indicators = []
+            
             while True:
                 char = process.stdout.read(1)
                 if not char:
                     # End of stream
-                    if buffer:
+                    if buffer.strip():
                         log_callback(buffer)
                     break
 
                 if self.should_stop:
                     log_callback("Termination signal received, stopping subprocess.")
-                    process.terminate()
+                    try:
+                        process.terminate()
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        log_callback("Force killing unresponsive process...")
+                        process.kill()
                     break
 
                 if char in ['\n', '\r']:
-                    if buffer:
-                        log_callback(buffer)
+                    if buffer.strip():
+                        line = buffer.strip()
+                        log_callback(line)
+                        
+                        # Collect error indicators for better diagnosis
+                        if any(indicator in line.lower() for indicator in ['error', 'failed', 'exception', 'traceback']):
+                            error_buffer.append(line)
+                        elif any(indicator in line.lower() for indicator in ['success', 'completed', 'finished', 'saved']):
+                            success_indicators.append(line)
+                            
                     buffer = ""
                 else:
                     buffer += char
@@ -71,15 +94,31 @@ class GUIProcessor:
             return_code = process.wait()
             
             if return_code != 0:
-                log_callback(f"Process failed with exit code {return_code}")
+                error_msg = f"Process failed with exit code {return_code}"
+                if error_buffer:
+                    error_msg += f"\nRecent errors: {'; '.join(error_buffer[-3:])}"
+                log_callback(error_msg)
                 return False
             
-            log_callback("Subprocess completed successfully.")
+            success_msg = "Subprocess completed successfully."
+            if success_indicators:
+                success_msg += f" Latest: {success_indicators[-1]}"
+            log_callback(success_msg)
             return True
 
-        except Exception as e:
-            error_message = f"Error running subprocess: {e}"
+        except FileNotFoundError as e:
+            error_message = f"Command not found: {e}. Please ensure Python and required modules are installed."
             logging.error(error_message)
+            log_callback(error_message)
+            return False
+        except subprocess.TimeoutExpired:
+            error_message = "Process timed out and was terminated."
+            logging.error(error_message)
+            log_callback(error_message)
+            return False
+        except Exception as e:
+            error_message = f"Unexpected error running subprocess: {e.__class__.__name__}: {e}"
+            logging.error(error_message, exc_info=True)
             log_callback(error_message)
             return False
         finally:
@@ -156,13 +195,15 @@ class GUIProcessor:
             sys.executable, "-u", "src/processing/main.py",
             file_path,
             "--model", settings.get('model', 'medium'),
-            "--target_language", settings.get('target_language', 'zh-CN'),
+            "--target_language", settings.get('target_language', 'none'),
             "--output_format", settings.get('output_format', 'bilingual'),
             "--max_subtitle_chars", str(settings.get('max_chars', 80)),
         ]
         
-        if settings.get('source_language', 'auto') != 'auto':
-            cmd.extend(["--source_language", settings['source_language']])
+        # Add optional parameters with validation
+        source_language = settings.get('source_language', 'auto')
+        if source_language != 'auto':
+            cmd.extend(["--source_language", source_language])
 
         if settings.get('no_audio_preprocessing'):
             cmd.append("--no_audio_preprocessing")
@@ -170,10 +211,45 @@ class GUIProcessor:
             cmd.append("--no_normalize_audio")
         if settings.get('no_denoise'):
             cmd.append("--no_denoise")
+        if settings.get('use_ai_vocal_separation'):
+            cmd.append("--use_ai_vocal_separation")
 
-        # Add parameters with values
-        cmd.extend(["--target_dbfs", str(settings.get('target_dbfs', -20.0))])
-        cmd.extend(["--noise_reduction_strength", str(settings.get('noise_reduction_strength', 0.5))])
+        # Add parameters with values and validation
+        try:
+            target_dbfs = float(settings.get('target_dbfs', -20.0))
+            if target_dbfs < -60.0 or target_dbfs > 0.0:
+                log_callback(f"Warning: target_dbfs {target_dbfs} out of range, using -20.0")
+                target_dbfs = -20.0
+            cmd.extend(["--target_dbfs", str(target_dbfs)])
+        except (ValueError, TypeError):
+            log_callback("Warning: Invalid target_dbfs, using -20.0")
+            cmd.extend(["--target_dbfs", "-20.0"])
+            
+        try:
+            noise_strength = float(settings.get('noise_reduction_strength', 0.5))
+            if noise_strength < 0.0 or noise_strength > 1.0:
+                log_callback(f"Warning: noise_reduction_strength {noise_strength} out of range, using 0.5")
+                noise_strength = 0.5
+            cmd.extend(["--noise_reduction_strength", str(noise_strength)])
+        except (ValueError, TypeError):
+            log_callback("Warning: Invalid noise_reduction_strength, using 0.5")
+            cmd.extend(["--noise_reduction_strength", "0.5"])
+        # Import DEFAULT_SEGMENTATION_STRATEGY for consistency
+        try:
+            from src.utils.constants import DEFAULT_SEGMENTATION_STRATEGY
+            default_strategy = DEFAULT_SEGMENTATION_STRATEGY
+        except ImportError:
+            default_strategy = "spacy"
+        cmd.extend(["--segmentation_strategy", settings.get('segmentation_strategy', default_strategy)])
+        
+        # Add missing GUI parameters
+        cmd.extend(["--chunk_duration", str(settings.get('chunk_time', 30))])
+        cmd.extend(["--long_audio_threshold", str(settings.get('long_audio_threshold', 15))])
+        
+        # Performance settings
+        cmd.extend(["--max_workers", str(settings.get('max_workers', 2))])
+        if settings.get('no_parallel_processing'):
+            cmd.append("--no_parallel_processing")
 
         if settings.get('no_keep_preprocessed'):
             cmd.append("--no_keep_preprocessed")
@@ -243,7 +319,7 @@ class GUIProcessor:
             project_name,
             chunk_list,
             "--model", settings.get('model', 'large'),
-            "--target_language", settings.get('target_language', 'zh-CN'),
+            "--target_language", settings.get('target_language', 'none'),
             "--output_format", settings.get('output_format', 'bilingual'),
             "--max_subtitle_chars", str(settings.get('max_chars', 80))
         ]
@@ -254,7 +330,26 @@ class GUIProcessor:
         return self._run_subprocess(cmd, log_callback)
     
     def merge_chunks(self, project_name: str, subfolder: str, log_callback: Callable) -> bool:
-        """Merge subtitle chunks from specified subfolder."""
+        """Merge subtitle chunks from specified subfolder or auto-detect location."""
+        # Auto-detect chunk location if subfolder not specified
+        if subfolder is None:
+            try:
+                from src.utils.constants import get_output_dir
+                project_dir = get_output_dir() / project_name
+            except ImportError:
+                project_dir = Path("output_subtitles") / project_name
+            
+            # Check root directory first
+            if any(project_dir.glob("chunk_*.srt")):
+                subfolder = None
+            else:
+                # Look for chunk files in subdirectories
+                for subdir in project_dir.iterdir():
+                    if subdir.is_dir() and any(subdir.glob("chunk_*.srt")):
+                        subfolder = subdir.name
+                        log_callback(f"Found chunks in subdirectory: {subfolder}")
+                        break
+        
         cmd = [
             sys.executable, "src/processing/merge_subtitles.py",
             project_name
@@ -267,7 +362,12 @@ class GUIProcessor:
     
     def get_available_projects(self) -> List[str]:
         """Get list of available projects."""
-        output_dir = Path("output_subtitles")
+        try:
+            from src.utils.constants import get_output_dir
+            output_dir = get_output_dir()
+        except ImportError:
+            output_dir = Path("output_subtitles")
+            
         if not output_dir.exists():
             return []
         
@@ -280,7 +380,11 @@ class GUIProcessor:
     
     def get_project_chunks(self, project_name: str, subfolder: str = None) -> List[Dict[str, Any]]:
         """Get chunks for a specific project and optional subfolder."""
-        project_dir = Path("output_subtitles") / project_name
+        try:
+            from src.utils.constants import get_output_dir
+            project_dir = get_output_dir() / project_name
+        except ImportError:
+            project_dir = Path("output_subtitles") / project_name
         if subfolder:
             project_dir = project_dir / subfolder
             
@@ -304,7 +408,11 @@ class GUIProcessor:
     
     def get_project_subfolders(self, project_name: str) -> List[str]:
         """Get available translation subfolders for a project."""
-        project_dir = Path("output_subtitles") / project_name
+        try:
+            from src.utils.constants import get_output_dir
+            project_dir = get_output_dir() / project_name
+        except ImportError:
+            project_dir = Path("output_subtitles") / project_name
         if not project_dir.exists():
             return []
             

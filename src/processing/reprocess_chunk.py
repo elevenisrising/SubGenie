@@ -66,9 +66,14 @@ except Exception as e:
     print("Make sure main.py is in the same directory.")
     sys.exit(1)
 
-# Configuration
-INPUT_DIR = "input_audio"
-OUTPUT_DIR = "output_subtitles"
+# Configuration - use dynamic paths
+try:
+    from src.utils.constants import get_input_dir, get_output_dir, INPUT_DIR_NAME, OUTPUT_DIR_NAME
+    INPUT_DIR = INPUT_DIR_NAME  # For backward compatibility
+    OUTPUT_DIR = OUTPUT_DIR_NAME  # For backward compatibility
+except ImportError:
+    INPUT_DIR = "input_audio"
+    OUTPUT_DIR = "output_subtitles"
 
 def load_chunk_timing(output_dir):
     """Load chunk timing information from chunk_timing.json."""
@@ -87,10 +92,11 @@ def load_chunk_timing(output_dir):
         print(f"❌ Failed to load timing file: {e}")
         return None
 
-def find_best_audio_file(output_dir, chunk_index, use_preprocessed=False):
+def find_best_audio_file(output_dir, chunk_index, use_preprocessed=True):
     """
     Find the best available audio file for a chunk.
     Priority: preprocessed > original chunk file
+    Default: Always prefer preprocessed files when available
     """
     raw_chunk_path = Path(output_dir) / "chunks_raw" / f"chunk_{chunk_index}.wav"
     preprocessed_chunk_path = Path(output_dir) / "chunks_preprocessed" / f"chunk_{chunk_index}_preprocessed.wav"
@@ -101,6 +107,8 @@ def find_best_audio_file(output_dir, chunk_index, use_preprocessed=False):
     
     if raw_chunk_path.exists():
         print(f"    📁 Using original raw audio: {raw_chunk_path.name}")
+        if use_preprocessed:
+            print(f"    ⚠️  Warning: Preprocessed file not found, falling back to raw audio")
         return str(raw_chunk_path)
 
     print(f"❌ No audio file found for chunk {chunk_index} in 'chunks_raw' or 'chunks_preprocessed'")
@@ -127,8 +135,8 @@ def process_single_chunk_optimized(chunk_path, chunk_timing, model, args, exact_
         print(f"    ❌ Transcription failed: {e}")
         return []
     
-    # Structure and split segments
-    display_segments = structure_and_split_segments(transcription, args.max_subtitle_chars)
+    # Structure and split segments with segmentation strategy
+    display_segments = structure_and_split_segments(transcription, args.max_subtitle_chars, args.segmentation_strategy)
     
     subtitles = []
     for segment in tqdm(display_segments, desc=f"    Processing segments", unit="segment"):
@@ -140,27 +148,30 @@ def process_single_chunk_optimized(chunk_path, chunk_timing, model, args, exact_
         processed_text = apply_glossary(original_text, exact_replace_rules)
         
         translated_text = ""
-        if args.translate_during_detection and args.output_format != 'source':
+        if (args.translate_during_detection and 
+            args.target_language != 'none'):  # Only depends on whether translation is enabled
             source_lang = args.source_language if args.source_language else 'auto'
             translated_text = translate_text(processed_text, args.target_language, pre_translate_rules, source_lang)
         
         final_processed_text = finalize_subtitle_text(processed_text)
         final_translated_text = finalize_subtitle_text(translated_text)
         
-        # Determine content based on output format
+        # Determine content based on output format (independent of what was generated)
         content = ""
         if args.output_format == 'bilingual':
-            if args.translate_during_detection:
+            if final_translated_text:
                 content = f"{final_processed_text}\n{final_translated_text}"
             else:
+                # No translation generated, show source only
                 content = final_processed_text
-        elif args.output_format == 'source':
-            content = final_processed_text
         elif args.output_format == 'target':
-            if args.translate_during_detection:
+            if final_translated_text:
                 content = final_translated_text
             else:
+                # No translation available, fallback to source
                 content = final_processed_text
+        else:  # source
+            content = final_processed_text
         
         # Apply chunk timing offset
         sub = srt.Subtitle(
@@ -291,13 +302,16 @@ def main():
     
     # Model and language parameters
     parser.add_argument("--model", default="large", help="Whisper model size (default: large)")
-    parser.add_argument("--target_language", default="zh-CN", help="Target language for translation")
+    parser.add_argument("--target_language", default="none", help="Target language for translation")
     parser.add_argument("--source_language", help="Source language (auto-detect if not specified)")
     parser.add_argument("--output_format", default="bilingual", choices=['bilingual', 'source', 'target'],
                        help="Output format: bilingual, source only, or target only")
     
     # Processing options
     parser.add_argument("--max_subtitle_chars", type=int, default=80, help="Maximum characters per subtitle line")
+    parser.add_argument("--segmentation_strategy", default="rule_based", 
+                       choices=['rule_based', 'whisper', 'hybrid'],
+                       help="Segmentation strategy: rule_based, whisper, or hybrid")
     parser.add_argument("--translate_during_detection", action="store_true",
                        help="Enable translation during processing")
     parser.add_argument("--use-preprocessed", action="store_true",

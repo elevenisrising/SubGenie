@@ -3,8 +3,12 @@ import srt
 import argparse
 import re
 
-# Define the main directory for output subtitles
-OUTPUT_DIR = 'output_subtitles'
+# Define the main directory for output subtitles - use dynamic paths
+try:
+    from src.utils.constants import get_output_dir, OUTPUT_DIR_NAME
+    OUTPUT_DIR = OUTPUT_DIR_NAME  # For backward compatibility
+except ImportError:
+    OUTPUT_DIR = 'output_subtitles'
 
 def merge_subtitles(directory_name, lang_code, subfolder=None):
     """
@@ -62,9 +66,35 @@ def merge_subtitles(directory_name, lang_code, subfolder=None):
             elif lang_code == 'zh':
                 sub.content = parts[1] if len(parts) > 1 else ''
     
-    # Re-index all subtitles
+    # Re-index all subtitles with timing validation
+    prev_end_time = 0.0
+    max_timestamp = 0.0
+    timing_issues = 0
+    
     for i, sub in enumerate(all_subtitles):
         sub.index = i + 1
+        
+        start_sec = sub.start.total_seconds()
+        end_sec = sub.end.total_seconds()
+        
+        # Check for timing issues
+        if start_sec < prev_end_time:
+            timing_issues += 1
+            if timing_issues <= 3:  # Only log first few issues
+                print(f"  ⚠️ Warning: Subtitle {i+1} overlaps with previous: {start_sec:.2f}s < {prev_end_time:.2f}s")
+        
+        max_timestamp = max(max_timestamp, end_sec)
+        prev_end_time = end_sec
+    
+    if timing_issues > 0:
+        print(f"  ⚠️ Total timing issues found: {timing_issues}")
+    
+    # Log final timing statistics
+    total_duration_hours = max_timestamp / 3600.0
+    print(f"\n📊 MERGE TIMING ANALYSIS:")
+    print(f"  Total subtitles merged: {len(all_subtitles)}")
+    print(f"  Maximum timestamp: {max_timestamp:.2f}s ({max_timestamp/60:.1f} minutes, {total_duration_hours:.2f} hours)")
+    print(f"  Timing overlaps detected: {timing_issues}")
 
     # Define the output filename with language code and subfolder
     if subfolder:
@@ -84,7 +114,14 @@ def merge_subtitles(directory_name, lang_code, subfolder=None):
         merged_content = srt.compose(all_subtitles)
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(merged_content)
-        print(f"\nMerge successful! Final file saved to: {output_path}")
+        print(f"\n✅ Merge successful! Final file saved to: {output_path}")
+        
+        # Final file size check
+        try:
+            file_size = os.path.getsize(output_path)
+            print(f"  File size: {file_size:,} bytes ({file_size/1024:.1f} KB)")
+        except Exception:
+            pass
     except Exception as e:
         print(f"Error saving the merged file: {e}")
 

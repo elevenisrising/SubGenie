@@ -28,6 +28,8 @@ class MainInterface:
         self.create_widgets()
         self.bind_events()
         self.ensure_directories()
+        # Set initial output format constraints
+        self.on_target_language_change()
     
     def store_translatable_component(self, component, text_key):
         """Store a reference to a component that needs text translation."""
@@ -61,87 +63,147 @@ class MainInterface:
         self.create_status_bar()
     
     def create_file_section(self):
-        """Create compact file selection section."""
-        file_frame = ctk.CTkFrame(self.header_frame)
-        file_frame.grid(row=0, column=0, sticky="ew")
-        file_frame.grid_columnconfigure(0, weight=1)
+        """Create file selection section with left controls and right scrollable file list."""
+        import os
         
-        # Top row: Files section with inline directory settings
-        top_frame = ctk.CTkFrame(file_frame)
-        top_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-        top_frame.grid_columnconfigure(2, weight=1)
+        # Main file section with more height
+        file_frame = ctk.CTkFrame(self.header_frame, height=180)
+        file_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        file_frame.grid_columnconfigure(1, weight=1)
+        file_frame.grid_propagate(False)
         
-        # File controls (left side)
-        files_label = ctk.CTkLabel(top_frame, text=self.lang.get_string("files_section_title"), 
-                    font=ctk.CTkFont(size=14, weight="bold"))
-        files_label.grid(row=0, column=0, padx=5, sticky="w")
+        # Left side - Controls and settings (fixed width)
+        controls_frame = ctk.CTkFrame(file_frame, width=280)
+        controls_frame.grid(row=0, column=0, sticky="ns", padx=(5, 2), pady=5)
+        controls_frame.grid_propagate(False)
+        
+        # Title only
+        files_label = ctk.CTkLabel(controls_frame, text=self.lang.get_string("files_section_title"), 
+                                   font=ctk.CTkFont(size=14, weight="bold"))
+        files_label.pack(anchor="w", padx=5, pady=(5, 10))
         self.store_translatable_component(files_label, "files_section_title")
         
-        btn_frame = ctk.CTkFrame(top_frame)
-        btn_frame.grid(row=0, column=1, padx=5)
+        # File operation buttons - 2x2 grid layout
+        btn_frame = ctk.CTkFrame(controls_frame)
+        btn_frame.pack(fill="x", padx=5, pady=5)
+        btn_frame.grid_columnconfigure(0, weight=1)
+        btn_frame.grid_columnconfigure(1, weight=1)
         
-        add_files_btn = ctk.CTkButton(btn_frame, text=self.lang.get_string("add_files"), width=80, height=25,
-                     command=self.add_files)
-        add_files_btn.pack(side="left", padx=2)
+        add_files_btn = ctk.CTkButton(btn_frame, text=self.lang.get_string("add_files"), 
+                                      height=20, width=120, command=self.add_files)
+        add_files_btn.grid(row=0, column=0, padx=2, pady=1, sticky="ew")
         self.store_translatable_component(add_files_btn, "add_files")
         
-        add_folder_btn = ctk.CTkButton(btn_frame, text=self.lang.get_string("add_folder"), width=80, height=25,
-                     command=self.add_folder)
-        add_folder_btn.pack(side="left", padx=2)
+        add_folder_btn = ctk.CTkButton(btn_frame, text=self.lang.get_string("add_folder"), 
+                                       height=20, width=120, command=self.add_folder)
+        add_folder_btn.grid(row=0, column=1, padx=2, pady=1, sticky="ew")
         self.store_translatable_component(add_folder_btn, "add_folder")
         
-        remove_btn = ctk.CTkButton(btn_frame, text=self.lang.get_string("remove"), width=60, height=25,
-                     command=self.remove_files)
-        remove_btn.pack(side="left", padx=2)
+        remove_btn = ctk.CTkButton(btn_frame, text=self.lang.get_string("remove"), 
+                                   height=20, width=120, command=self.remove_files)
+        remove_btn.grid(row=1, column=0, padx=2, pady=1, sticky="ew")
         self.store_translatable_component(remove_btn, "remove")
         
-        clear_btn = ctk.CTkButton(btn_frame, text=self.lang.get_string("clear"), width=50, height=25,
-                     command=self.clear_files)
-        clear_btn.pack(side="left", padx=2)
+        clear_btn = ctk.CTkButton(btn_frame, text=self.lang.get_string("clear"), 
+                                  height=20, width=120, command=self.clear_files)
+        clear_btn.grid(row=1, column=1, padx=2, pady=1, sticky="ew")
         self.store_translatable_component(clear_btn, "clear")
         
-        # Directory settings (right side)
-        dirs_frame = ctk.CTkFrame(top_frame)
-        dirs_frame.grid(row=0, column=2, padx=5, sticky="ew")
-        dirs_frame.grid_columnconfigure(1, weight=1)
-        dirs_frame.grid_columnconfigure(3, weight=1)
+        # Directory settings - below buttons
+        dir_frame = ctk.CTkFrame(controls_frame)
+        dir_frame.pack(fill="x", padx=5, pady=(10, 5))
+        dir_frame.grid_columnconfigure(1, weight=1)
         
-        # Source directory (first row)  
-        input_label = ctk.CTkLabel(dirs_frame, text=self.lang.get_string("input_dir"), 
-                    font=ctk.CTkFont(size=10, weight="bold"))
-        input_label.grid(row=0, column=0, padx=2, sticky="w")
+        # Use centralized path management
+        try:
+            from src.utils.constants import get_input_dir, get_output_dir
+            default_input = str(get_input_dir())
+            default_output = str(get_output_dir())
+        except ImportError:
+            # Fallback to working directory relative paths
+            working_dir = Path.cwd()
+            default_input = str(working_dir / "input_audio")
+            default_output = str(working_dir / "output_subtitles")
+        
+        self.source_dir_var = tk.StringVar(value=default_input)
+        self.output_dir_var = tk.StringVar(value=default_output)
+        
+        # Input directory
+        input_label = ctk.CTkLabel(dir_frame, text=self.lang.get_string("input_dir"), font=ctk.CTkFont(size=10))
+        input_label.grid(row=0, column=0, sticky="w", padx=3, pady=2)
         self.store_translatable_component(input_label, "input_dir")
         
-        self.source_dir_var = tk.StringVar(value=str(Path("input_audio").absolute()))
-        source_entry = ctk.CTkEntry(dirs_frame, textvariable=self.source_dir_var, font=ctk.CTkFont(size=9))
-        source_entry.grid(row=0, column=1, padx=2, sticky="ew")
+        input_entry = ctk.CTkEntry(dir_frame, textvariable=self.source_dir_var, font=ctk.CTkFont(size=9), height=24)
+        input_entry.grid(row=0, column=1, sticky="ew", padx=3, pady=2)
         
-        output_label = ctk.CTkLabel(dirs_frame, text=self.lang.get_string("output_dir"), 
-                    font=ctk.CTkFont(size=10, weight="bold"))
-        output_label.grid(row=0, column=2, padx=2, sticky="w")
+        browse_input_btn = ctk.CTkButton(dir_frame, text=self.lang.get_string("browse"), 
+                                         width=50, height=24, command=self.browse_source_dir,
+                                         font=ctk.CTkFont(size=9))
+        browse_input_btn.grid(row=0, column=2, padx=3, pady=2)
+        self.store_translatable_component(browse_input_btn, "browse")
+        
+        # Output directory
+        output_label = ctk.CTkLabel(dir_frame, text=self.lang.get_string("output_dir"), font=ctk.CTkFont(size=10))
+        output_label.grid(row=1, column=0, sticky="w", padx=3, pady=2)
         self.store_translatable_component(output_label, "output_dir")
         
-        self.output_dir_var = tk.StringVar(value=str(Path("output_subtitles").absolute()))
-        output_entry = ctk.CTkEntry(dirs_frame, textvariable=self.output_dir_var, font=ctk.CTkFont(size=9))
-        output_entry.grid(row=0, column=3, padx=2, sticky="ew")
+        output_entry = ctk.CTkEntry(dir_frame, textvariable=self.output_dir_var, font=ctk.CTkFont(size=9), height=24)
+        output_entry.grid(row=1, column=1, sticky="ew", padx=3, pady=2)
         
-        # Browse buttons (second row)
-        browse_btn = ctk.CTkButton(dirs_frame, text=self.lang.get_string("browse"), width=50, height=20,
-                     command=self.browse_source_dir, font=ctk.CTkFont(size=9))
-        browse_btn.grid(row=1, column=1, padx=2, pady=2)
-        self.store_translatable_component(browse_btn, "browse")
+        browse_output_btn = ctk.CTkButton(dir_frame, text=self.lang.get_string("browse"), 
+                                          width=50, height=24, command=self.browse_output_dir,
+                                          font=ctk.CTkFont(size=9))
+        browse_output_btn.grid(row=1, column=2, padx=3, pady=2)
+        self.store_translatable_component(browse_output_btn, "browse")
         
-        open_btn = ctk.CTkButton(dirs_frame, text=self.lang.get_string("open"), width=50, height=20,
-                     command=self.open_output_folder, font=ctk.CTkFont(size=9))
-        open_btn.grid(row=1, column=3, padx=2, pady=2)  
-        self.store_translatable_component(open_btn, "open")
-        
-        # Compact file list
+        # Right side - Scrollable file list (expandable)
         list_frame = ctk.CTkFrame(file_frame)
-        list_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
+        list_frame.grid(row=0, column=1, sticky="nsew", padx=(2, 5), pady=5)
+        list_frame.grid_rowconfigure(1, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
         
-        self.file_listbox = tk.Listbox(list_frame, height=2, font=("Consolas", 9))
-        self.file_listbox.pack(fill="x", padx=5, pady=3)
+        # File list title with language button
+        title_header = ctk.CTkFrame(list_frame)
+        title_header.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+        title_header.grid_columnconfigure(0, weight=1)
+        
+        list_title = ctk.CTkLabel(title_header, text=self.lang.get_string("selected_files_title"), font=ctk.CTkFont(size=12, weight="bold"))
+        list_title.grid(row=0, column=0, sticky="w")
+        self.store_translatable_component(list_title, "selected_files_title")
+        
+        # Language toggle button - compact square design
+        self.lang_button = ctk.CTkButton(
+            title_header,
+            text=self._get_language_button_text(),
+            width=32,
+            height=28,
+            command=self.toggle_language,
+            fg_color=("#1E1E1E", "#2D2D30"),  # VS Code dark theme inspired
+            hover_color=("#007ACC", "#0E639C"),  # Blue accent on hover
+            text_color=("#CCCCCC", "#FFFFFF"),
+            border_width=0,
+            corner_radius=6,
+            font=ctk.CTkFont(size=9, weight="bold")
+        )
+        self.lang_button.grid(row=0, column=1, sticky="e", padx=(10, 0))
+        
+        # Scrollable listbox container
+        listbox_container = ctk.CTkFrame(list_frame)
+        listbox_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        
+        # Create listbox with scrollbar - ensure proper scrolling
+        self.file_listbox = tk.Listbox(
+            listbox_container, 
+            font=("Consolas", 9),
+            selectmode=tk.EXTENDED,  # Allow multiple selections
+            activestyle="none"
+        )
+        scrollbar = tk.Scrollbar(listbox_container, orient="vertical", command=self.file_listbox.yview)
+        self.file_listbox.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack listbox and scrollbar
+        self.file_listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
     
     def create_content_area(self):
         """Create main content area with tabs."""
@@ -162,20 +224,16 @@ class MainInterface:
         self.create_merge_tab(self.merge_tab)
 
     def create_language_switcher(self):
-        """Create language switcher."""
-        lang_frame = ctk.CTkFrame(self.header_frame)
-        lang_frame.grid(row=0, column=1, sticky="ne", padx=5, pady=5)
+        """Language switcher is now created in the file list title area."""  
+        pass
 
-        self.lang_button = ctk.CTkButton(
-            lang_frame,
-            text=self.lang.get_string("lang_toggle_zh") if self.lang.current_language == "en" else self.lang.get_string("lang_toggle_en"),
-            width=50,
-            command=self.toggle_language,
-            fg_color="#367E80",  # A different color
-            hover_color="#45A4A6"
-        )
-        self.lang_button.pack(side="left", padx=5)
-
+    def _get_language_button_text(self):
+        """Get compact text for language button"""
+        if self.lang.current_language == "en":
+            return "中"  # Just Chinese character
+        else:
+            return "EN"  # Just English abbreviation
+    
     def toggle_language(self):
         """Toggle language between en and zh."""
         if self.lang.current_language == "en":
@@ -188,8 +246,8 @@ class MainInterface:
     def update_language_strings(self):
         """Update all UI text strings without recreating widgets."""
         try:
-            # Update language button text
-            self.lang_button.configure(text=self.lang.get_string("lang_toggle_zh") if self.lang.current_language == "en" else self.lang.get_string("lang_toggle_en"))
+            # Update language button text with new styled text
+            self.lang_button.configure(text=self._get_language_button_text())
             
             # Update window title
             if hasattr(self.app, 'update_title'):
@@ -214,6 +272,8 @@ class MainInterface:
             if hasattr(self, 'translation_mode_var'):
                 current_mode = self.translation_mode_var.get()
                 self.set_translation_status(current_mode)
+            else:
+                self.set_translation_status("free")
             
             print(f"Language successfully switched to: {self.lang.current_language}")
             
@@ -383,7 +443,13 @@ class MainInterface:
         source_label = ctk.CTkLabel(lang_row1, text=self.lang.get_string("source_lang_label"))
         source_label.pack(side="left", padx=5)
         self.store_translatable_component(source_label, "source_lang_label")
-        self.source_lang_var = tk.StringVar(value=self.lang.get_string("auto_detect"))
+        # Use centralized defaults for consistency
+        try:
+            from src.utils.constants import DEFAULT_SOURCE_LANGUAGE
+            default_source = self.lang.get_string("auto_detect") if DEFAULT_SOURCE_LANGUAGE == "auto" else DEFAULT_SOURCE_LANGUAGE
+        except ImportError:
+            default_source = self.lang.get_string("auto_detect")
+        self.source_lang_var = tk.StringVar(value=default_source)
 
         source_lang_names = [
             self.lang.get_string("auto_detect"), self.lang.get_string("english"), self.lang.get_string("spanish"), 
@@ -402,7 +468,21 @@ class MainInterface:
         target_label = ctk.CTkLabel(lang_row1, text=self.lang.get_string("target_lang_label"))
         target_label.pack(side="left", padx=(20, 5))
         self.store_translatable_component(target_label, "target_lang_label")
-        self.target_lang_var = tk.StringVar(value=self.lang.get_string("no_translation"))
+        # Use centralized defaults for target language
+        try:
+            from src.utils.constants import DEFAULT_TARGET_LANGUAGE
+            # Map language code to GUI display string
+            if DEFAULT_TARGET_LANGUAGE == "zh-CN":
+                default_target = self.lang.get_string("chinese_simplified")
+            elif DEFAULT_TARGET_LANGUAGE == "zh-TW":
+                default_target = self.lang.get_string("chinese_traditional")
+            elif DEFAULT_TARGET_LANGUAGE == "en":
+                default_target = self.lang.get_string("english")
+            else:
+                default_target = self.lang.get_string("no_translation")
+        except ImportError:
+            default_target = self.lang.get_string("no_translation")
+        self.target_lang_var = tk.StringVar(value=default_target)
 
         target_lang_names = [
             self.lang.get_string("no_translation"), self.lang.get_string("chinese_simplified"), self.lang.get_string("chinese_traditional"), 
@@ -414,7 +494,8 @@ class MainInterface:
             lang_row1,
             values=target_lang_names,
             variable=self.target_lang_var,
-            width=180
+            width=180,
+            command=self.on_target_language_change
         )
         self.target_lang_combo.pack(side="left", padx=5)
         
@@ -440,6 +521,32 @@ class MainInterface:
         self.store_translatable_component(max_chars_label, "max_chars_label")
         self.max_chars_var = tk.StringVar(value="80")
         ctk.CTkEntry(lang_row2, textvariable=self.max_chars_var, width=60).pack(side="left", padx=5)
+        
+        chunk_time_label = ctk.CTkLabel(lang_row2, text=self.lang.get_string("chunk_time_label"))
+        chunk_time_label.pack(side="left", padx=(20, 5))
+        self.store_translatable_component(chunk_time_label, "chunk_time_label")
+        self.chunk_time_var = tk.StringVar(value="30")
+        ctk.CTkEntry(lang_row2, textvariable=self.chunk_time_var, width=60).pack(side="left", padx=5)
+        
+        # Third row: Segmentation Strategy
+        lang_row3 = ctk.CTkFrame(lang_model_frame)
+        lang_row3.pack(fill="x", padx=10, pady=5)
+        
+        seg_label = ctk.CTkLabel(lang_row3, text=self.lang.get_string("segmentation_strategy_label"))
+        seg_label.pack(side="left", padx=(0, 5))
+        self.store_translatable_component(seg_label, "segmentation_strategy_label")
+        
+        self.segmentation_strategy_var = tk.StringVar(value="spacy")
+        segmentation_combo = ctk.CTkComboBox(
+            lang_row3,
+            values=[
+                self.lang.get_string("spacy_segmentation"),
+                self.lang.get_string("whisper_segmentation")
+            ],
+            variable=self.segmentation_strategy_var,
+            width=150
+        )
+        segmentation_combo.pack(side="left", padx=5)
 
         # Output format
         output_frame = ctk.CTkFrame(basic_scroll)
@@ -470,6 +577,11 @@ class MainInterface:
         bilingual_radio.pack(side="left", padx=10)
         self.store_translatable_component(bilingual_radio, "bilingual_radio")
         
+        # Store radio buttons for enabling/disabling
+        self.source_radio = source_radio
+        self.target_radio = target_radio
+        self.bilingual_radio = bilingual_radio
+        
         # Audio Settings
         audio_frame = ctk.CTkFrame(basic_scroll)
         audio_frame.pack(fill="x", padx=10, pady=10)
@@ -498,6 +610,11 @@ class MainInterface:
         no_denoise_check.pack(side="left", padx=10)
         self.store_translatable_component(no_denoise_check, "disable_denoise_checkbox")
         
+        self.use_ai_vocal_separation_var = tk.BooleanVar(value=False)
+        ai_vocal_check = ctk.CTkCheckBox(check_row, text=self.lang.get_string("use_ai_vocal_separation_checkbox"), variable=self.use_ai_vocal_separation_var)
+        ai_vocal_check.pack(side="left", padx=10)
+        self.store_translatable_component(ai_vocal_check, "use_ai_vocal_separation_checkbox")
+        
         # Parameters
         param_row = ctk.CTkFrame(audio_frame)
         param_row.pack(fill="x", padx=10, pady=5)
@@ -513,6 +630,45 @@ class MainInterface:
         self.store_translatable_component(denoise_label, "denoise_strength_label")
         self.denoise_strength_var = tk.StringVar(value="0.5")
         ctk.CTkEntry(param_row, textvariable=self.denoise_strength_var, width=60).pack(side="left", padx=5)
+        
+        # Performance settings row
+        perf_row = ctk.CTkFrame(audio_frame)
+        perf_row.pack(fill="x", padx=10, pady=5)
+        
+        workers_label = ctk.CTkLabel(perf_row, text=self.lang.get_string("parallel_workers_label"))
+        workers_label.pack(side="left", padx=(10, 5))
+        self.store_translatable_component(workers_label, "parallel_workers_label")
+        self.max_workers_var = tk.StringVar(value="1")
+        ctk.CTkEntry(perf_row, textvariable=self.max_workers_var, width=60).pack(side="left", padx=5)
+        
+        self.no_parallel_var = tk.BooleanVar(value=False)
+        no_parallel_check = ctk.CTkCheckBox(perf_row, text=self.lang.get_string("disable_parallel_checkbox"), variable=self.no_parallel_var)
+        no_parallel_check.pack(side="left", padx=(20, 5))
+        self.store_translatable_component(no_parallel_check, "disable_parallel_checkbox")
+        
+    def on_target_language_change(self, value=None):
+        """Handle target language changes and enable/disable output format options."""
+        try:
+            target_lang = self.target_lang_var.get()
+            no_translation_text = self.lang.get_string("no_translation")
+            
+            if target_lang == no_translation_text:
+                # User selected "No Translation" - disable target and bilingual options
+                self.target_radio.configure(state="disabled")
+                self.bilingual_radio.configure(state="disabled")
+                
+                # If currently selected format is not available, switch to source
+                current_format = self.output_format_var.get()
+                if current_format in ["target", "bilingual"]:
+                    self.output_format_var.set("source")
+            else:
+                # User selected a translation language - enable all options
+                self.target_radio.configure(state="normal")
+                self.bilingual_radio.configure(state="normal")
+                
+        except Exception as e:
+            # Silently handle any errors to avoid disrupting the UI
+            print(f"Error in target language change handler: {e}")
 
     def create_advanced_tab(self, tab):
         """Create advanced options tab."""
@@ -539,7 +695,7 @@ class MainInterface:
         info_label.pack(anchor="w", padx=10, pady=2)
         self.store_translatable_component(info_label, "llm_translation_info")
         
-        self.translation_mode_var = tk.StringVar(value="free")
+        self.translation_mode_var = tk.StringVar(value="none")
         
         # Translation mode selection in one row
         mode_row = ctk.CTkFrame(trans_frame)
@@ -549,7 +705,7 @@ class MainInterface:
             mode_row, 
             text=self.lang.get_string("none_radio"), 
             variable=self.translation_mode_var, 
-            value="free"
+            value="none"
         )
         none_radio.pack(side="left", padx=10)
         self.store_translatable_component(none_radio, "none_radio")
@@ -579,12 +735,24 @@ class MainInterface:
         # This list MUST be initialized before on_translation_mode_change is called.
         self.current_settings_widgets = []
         
-        # Initialize variables that are used in get_current_settings
-        self.local_model_var = tk.StringVar(value="qwen2.5:7b")
-        self.chunk_size_var = tk.StringVar(value="3")
-        self.api_key_var = tk.StringVar(value="")  # TODO: Add your API key here
-        self.api_base_url_var = tk.StringVar(value="")  # TODO: Add your API base URL here
-        self.api_model_var = tk.StringVar(value="gemini-2.5-pro")
+        # Initialize variables using centralized constants
+        try:
+            from src.utils.constants import (
+                DEFAULT_LOCAL_MODEL, GUI_DEFAULT_CHUNK_SIZE, DEFAULT_API_MODEL
+            )
+            default_local_model = DEFAULT_LOCAL_MODEL
+            default_chunk_size = str(GUI_DEFAULT_CHUNK_SIZE)
+            default_api_model = DEFAULT_API_MODEL
+        except ImportError:
+            default_local_model = "qwen2.5:7b"
+            default_chunk_size = "5"
+            default_api_model = "gemini-2.5-pro"
+            
+        self.local_model_var = tk.StringVar(value=default_local_model)
+        self.chunk_size_var = tk.StringVar(value=default_chunk_size)
+        self.api_key_var = tk.StringVar(value="")
+        self.api_base_url_var = tk.StringVar(value="")
+        self.api_model_var = tk.StringVar(value=default_api_model)
         
         # Manually call the handler to set the initial UI state. This is now safe.
         self.on_translation_mode_change()
@@ -792,9 +960,15 @@ class MainInterface:
     
     def browse_merge_directory(self):
         """Browse for directory to merge."""
+        try:
+            from src.utils.constants import get_output_dir
+            initial_dir = str(get_output_dir())
+        except ImportError:
+            initial_dir = "output_subtitles"
+            
         directory = filedialog.askdirectory(
             title=self.lang.get_string("select_directory_title"),
-            initialdir="output_subtitles"
+            initialdir=initial_dir
         )
         if directory:
             self.merge_dir_var.set(directory)
@@ -816,7 +990,11 @@ class MainInterface:
         try:
             # Standardize path and find project root
             selected_path = Path(directory).resolve()
-            output_subtitles_path = Path("output_subtitles").resolve()
+            try:
+                from src.utils.constants import get_output_dir
+                output_subtitles_path = get_output_dir().resolve()
+            except ImportError:
+                output_subtitles_path = Path("output_subtitles").resolve()
 
             if not selected_path.is_relative_to(output_subtitles_path):
                 messagebox.showerror(self.lang.get_string("invalid_directory_error_title"), self.lang.get_string("invalid_directory_error_message").format(output_subtitles_path=output_subtitles_path))
@@ -829,7 +1007,7 @@ class MainInterface:
                 return
 
             project_name = relative_path.parts[0]
-            subfolder = relative_path.parts[1] if len(relative_path.parts) > 1 else "original"
+            subfolder = relative_path.parts[1] if len(relative_path.parts) > 1 else None
             
             self.add_log(f"Starting merge for project '{project_name}', subfolder '{subfolder}'...")
             
@@ -885,17 +1063,6 @@ class MainInterface:
         self.stop_btn.pack(side="left", padx=5, pady=5)
         self.store_translatable_component(self.stop_btn, "stop_btn")
         
-        # Settings button
-        settings_btn = ctk.CTkButton(
-            control_frame,
-            text=self.lang.get_string("settings_btn"),
-            font=ctk.CTkFont(size=11),
-            width=80,
-            height=32,
-            command=self.open_settings
-        )
-        settings_btn.pack(side="right", padx=5, pady=5)
-        self.store_translatable_component(settings_btn, "settings_btn")
         
         # Open output folder button
         output_btn = ctk.CTkButton(
@@ -950,6 +1117,11 @@ class MainInterface:
     def ensure_directories(self):
         """Ensure default directories exist."""
         try:
+            from src.utils.constants import get_input_dir, get_output_dir
+            get_input_dir().mkdir(parents=True, exist_ok=True)
+            get_output_dir().mkdir(parents=True, exist_ok=True)
+        except ImportError:
+            # Fallback to hardcoded paths
             Path("input_audio").mkdir(parents=True, exist_ok=True)
             Path("output_subtitles").mkdir(parents=True, exist_ok=True)
         except Exception as e:
@@ -1040,6 +1212,52 @@ class MainInterface:
             self.source_dir_var.set(folder_path)
             # Create directory if it doesn't exist
             Path(folder_path).mkdir(parents=True, exist_ok=True)
+    
+    def browse_output_dir(self):
+        """Browse for output directory."""
+        current_dir = self.output_dir_var.get() if Path(self.output_dir_var.get()).exists() else ""
+        folder_path = filedialog.askdirectory(
+            title=self.lang.get_string("select_output_directory_title"),
+            initialdir=current_dir
+        )
+        if folder_path:
+            self.output_dir_var.set(folder_path)
+            # Create directory if it doesn't exist
+            Path(folder_path).mkdir(parents=True, exist_ok=True)
+    
+    def _get_segmentation_strategy_value(self):
+        """Get the internal strategy value from GUI selection."""
+        if not hasattr(self, 'segmentation_strategy_var'):
+            return "spacy"
+        
+        display_value = self.segmentation_strategy_var.get()
+        
+        # Map display values to internal values
+        strategy_mapping = {
+            self.lang.get_string("spacy_segmentation"): "spacy",
+            self.lang.get_string("whisper_segmentation"): "whisper"
+        }
+        
+        # Also handle English/Chinese reverse mapping
+        reverse_mapping = {
+            "spaCy Grammar": "spacy",
+            "Whisper Segments": "whisper", 
+            "spaCy语法": "spacy",
+            "Whisper分句": "whisper"
+        }
+        
+        # Try current language mapping first
+        result = strategy_mapping.get(display_value)
+        if result:
+            return result
+            
+        # Try reverse mapping
+        result = reverse_mapping.get(display_value)
+        if result:
+            return result
+            
+        # Default fallback
+        return "spacy"
     
     def open_output_folder(self):
         """Open output folder in file explorer."""
@@ -1137,22 +1355,34 @@ class MainInterface:
             source_lang_code = self._map_language_to_code(source_lang_val)
 
         if target_lang_val == self.lang.get_string("no_translation"):
-            target_lang_code = "free"
+            target_lang_code = "none"  # Use 'none' instead of 'free'
         else:
             target_lang_code = self._map_language_to_code(target_lang_val)
 
         settings = {
+            # Core processing settings
             "model": self.model_var.get(),
             "source_language": source_lang_code,
             "target_language": target_lang_code,
             "output_format": self.output_format_var.get(),
+            
+            # Translation settings
             "translation_mode": translation_mode,
             "local_model": self.local_model_var.get(),
-            "max_chars": int(self.max_chars_var.get()) if self.max_chars_var.get().isdigit() else 80,
             "chunk_size": int(self.chunk_size_var.get()) if self.chunk_size_var.get().isdigit() else 3,
             "enable_translation": enable_translation,
             "custom_prompt": self.custom_prompt_text.get("1.0", "end-1c"),
             "prompt_preset": self.prompt_preset_var.get(),
+            
+            # Subtitle formatting
+            "max_chars": int(self.max_chars_var.get()) if self.max_chars_var.get().isdigit() else 80,
+            "segmentation_strategy": self._get_segmentation_strategy_value(),
+            
+            # Audio chunking (fixed parameter names)
+            "chunk_time": int(self.chunk_time_var.get()) if self.chunk_time_var.get().isdigit() else 30,
+            "long_audio_threshold": 15,  # Could be made configurable
+            
+            # Directory settings
             "source_directory": self.source_dir_var.get(),
             "output_directory": self.output_dir_var.get(),
             
@@ -1160,8 +1390,16 @@ class MainInterface:
             "no_audio_preprocessing": self.no_preprocessing_var.get(),
             "no_normalize_audio": self.no_normalize_var.get(),
             "no_denoise": self.no_denoise_var.get(),
+            "use_ai_vocal_separation": self.use_ai_vocal_separation_var.get(),
             "target_dbfs": float(self.target_dbfs_var.get()) if self.target_dbfs_var.get() else -20.0,
             "noise_reduction_strength": float(self.denoise_strength_var.get()) if self.denoise_strength_var.get() else 0.5,
+            
+            # Performance settings
+            "max_workers": int(self.max_workers_var.get()) if self.max_workers_var.get().isdigit() else 2,
+            "no_parallel_processing": self.no_parallel_var.get(),
+            
+            # Translation control - only enable if user actually chose a target language
+            "translate_during_detection": enable_translation,
         }
         
         # Always print API settings debug info
@@ -1194,7 +1432,7 @@ class MainInterface:
         
         mapping = {
             "auto_detect": "auto",
-            "no_translation": "free",
+            "no_translation": "none",
             "english": "en",
             "spanish": "es",
             "french": "fr",
@@ -1240,22 +1478,21 @@ class MainInterface:
 
     def set_translation_status(self, mode):
         """Update related UI elements based on translation mode."""
-        print(f"Setting translation status for mode: {mode}")  # Debug
-        if mode == "free":
-            self.target_lang_var.set(self.lang.get_string("no_translation"))
-            self.target_lang_combo.configure(state="disabled")
-            self.output_format_var.set("source")
-            for child in self.output_format_var.trace_info():
-                if child[0] == 'w':
-                    self.output_format_var.trace_vdelete('w', child[1])
+        # Target language is always available - user can choose whether to translate or not
+        self.target_lang_combo.configure(state="readonly")
+        
+        # Note: LLM translation is completely independent from basic processing output format
+        # LLM translation creates separate output files regardless of basic settings
+        # The output_format_var only affects the basic Google translation output
+        
+        # Only update target language if needed, but don't force output format changes
+        if mode == "none":
+            # No LLM translation - user can choose any basic translation settings
+            pass  # Don't modify any basic processing settings
         else:
-            self.target_lang_combo.configure(state="readonly")
-            if self.target_lang_var.get() == self.lang.get_string("no_translation"):
-                self.target_lang_var.set(self.lang.get_string("chinese_simplified"))
-            
-            # Re-enable output format options
-            # This logic might need more refinement if other modes have restrictions
-            self.output_format_var.set("bilingual")
+            # LLM translation modes (local/api) are completely independent
+            # They create their own output files, so don't affect basic processing
+            pass
 
     def update_status(self, message_key, **kwargs):
         """Update status bar with a translatable message."""

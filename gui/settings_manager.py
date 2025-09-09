@@ -11,29 +11,82 @@ from pathlib import Path
 from typing import Dict, Any
 import logging
 
+# Import centralized constants
+try:
+    from src.utils.constants import get_gui_default_parameters
+except ImportError:
+    # Fallback if constants can't be imported
+    get_gui_default_parameters = None
+
 class SettingsManager:
     """Manages application settings and preferences."""
     
     def __init__(self, settings_file="settings.json"):
         self.settings_file = Path(settings_file)
+        self._init_default_settings()
+    
+    def _get_dynamic_path(self, path_type: str) -> str:
+        """Get dynamic path based on current working directory."""
+        try:
+            from src.utils.constants import get_input_dir, get_output_dir, get_cache_dir, get_logs_dir
+            
+            if path_type == "input":
+                return str(get_input_dir())
+            elif path_type == "output":
+                return str(get_output_dir())
+            elif path_type == "cache":
+                return str(get_cache_dir())
+            elif path_type == "logs":
+                return str(get_logs_dir())
+        except ImportError:
+            # Fallback to hardcoded relative paths
+            base_dir = Path.cwd()
+            if path_type == "input":
+                return str(base_dir / "input_audio")
+            elif path_type == "output":
+                return str(base_dir / "output_subtitles")
+            elif path_type == "cache":
+                return str(base_dir / ".cache")
+            elif path_type == "logs":
+                return str(base_dir / "logs")
+        
+        return ""
+    
+    def _init_default_settings(self):
+        """Initialize default settings with dynamic paths."""
+        # Use centralized constants if available, otherwise fallback to hardcoded values
+        if get_gui_default_parameters:
+            gui_defaults = get_gui_default_parameters()
+        else:
+            gui_defaults = {
+                'whisper_model': 'medium',
+                'source_language': 'auto',
+                'target_language': 'zh-CN',
+                'output_format': 'source',
+                'max_subtitle_chars': 80,
+                'chunk_size': 5,
+                'local_model': 'qwen2.5:7b',
+                'api_model': 'gemini-2.5-pro'
+            }
+            
         self.default_settings = {
             "appearance": {
                 "theme": "system",  # system, dark, light
                 "color_theme": "blue"  # blue, green, dark-blue
             },
             "processing": {
-                "source_language": "auto",
-                "target_language": "zh-CN",
-                "whisper_model": "medium",
-                "output_format": "bilingual",
-                "max_chars": 80,
-                "chunk_size": 5
+                "source_language": gui_defaults.get('source_language', 'auto'),
+                "target_language": gui_defaults.get('target_language', 'none'),
+                "whisper_model": gui_defaults.get('whisper_model', 'medium'),
+                "output_format": gui_defaults.get('output_format', 'source'),
+                "max_chars": gui_defaults.get('max_subtitle_chars', 80),
+                "chunk_size": gui_defaults.get('chunk_size', 5)
             },
             "translation": {
                 "mode": "free",  # free, local, api
-                "local_model": "qwen2.5:7b",
+                "local_model": gui_defaults.get('local_model', 'qwen2.5:7b'),
                 "api_provider": "gemini",
-                "api_model": "gemini-2.5-pro"
+                "api_model": gui_defaults.get('api_model', 'gemini-2.5-pro')
             },
             "api_settings": {
                 "relay_api": {
@@ -57,10 +110,10 @@ class SettingsManager:
                 }
             },
             "paths": {
-                "input_directory": "input_audio",
-                "output_directory": "output_subtitles",
-                "cache_directory": ".cache",
-                "logs_directory": "logs"
+                "input_directory": self._get_dynamic_path("input"),
+                "output_directory": self._get_dynamic_path("output"),
+                "cache_directory": self._get_dynamic_path("cache"),
+                "logs_directory": self._get_dynamic_path("logs")
             },
             "advanced": {
                 "enable_logging": True,
@@ -217,7 +270,13 @@ class SettingsManager:
         # Validate processing settings
         processing = self.get_processing_settings()
         
-        max_chars = processing.get('max_chars', 80)
+        # Use centralized defaults for validation too
+        default_max_chars = 80
+        if get_gui_default_parameters:
+            gui_defaults = get_gui_default_parameters()
+            default_max_chars = gui_defaults.get('max_subtitle_chars', 80)
+        
+        max_chars = processing.get('max_chars', default_max_chars)
         if not isinstance(max_chars, int) or max_chars < 10 or max_chars > 200:
             issues['errors'].append("Max characters must be between 10 and 200")
         

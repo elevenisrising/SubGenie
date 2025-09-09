@@ -14,31 +14,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
-# Try to import spaCy - make it optional for now
-spacy = None
-nlp = None
-try:
-    import spacy
-    nlp = spacy.load("en_core_web_sm")
-    logging.info("spaCy model loaded successfully")
-except ImportError:
-    logging.warning("spaCy not available (typer dependency issue), will use fallback segmentation")
-    spacy = None
-    nlp = None
-except OSError:
-    logging.warning("spaCy English model 'en_core_web_sm' not found, will use fallback segmentation")
-    spacy = None  
-    nlp = None
+import spacy
 
-# Import clean segmentation logic
+# --- spaCy Model Loading ---
 try:
-    from .clean_segmentation import structure_and_split_segments
-except ImportError:
-    # Handle when run as script
-    import sys
-    from pathlib import Path
-    sys.path.append(str(Path(__file__).parent))
-    from clean_segmentation import structure_and_split_segments
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    logging.error("spaCy English model 'en_core_web_sm' not found.")
+    logging.error(f"Please run 'D:\\Anaconda\\envs\\asr-env\\python.exe -m spacy download en_core_web_sm' to install it.")
+    sys.exit(1)
 import numpy as np
 import srt
 import torch
@@ -57,11 +41,8 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 try:
     from src.utils.constants import (
         DEFAULT_CHUNK_DURATION, DEFAULT_LONG_AUDIO_THRESHOLD, DEFAULT_SEARCH_WINDOW,
-        DEFAULT_MAX_SUBTITLE_CHARS, DEFAULT_CACHE_EXPIRY_DAYS, DEFAULT_SEGMENTATION_STRATEGY,
-        get_processing_constants, get_cache_dir
+        DEFAULT_MAX_SUBTITLE_CHARS, DEFAULT_CACHE_EXPIRY_DAYS
     )
-    # Get processing constants
-    PROCESSING_CONSTANTS = get_processing_constants()
 except ImportError:
     # Fallback values if constants file not available
     DEFAULT_CHUNK_DURATION = 30
@@ -69,38 +50,21 @@ except ImportError:
     DEFAULT_SEARCH_WINDOW = 120
     DEFAULT_MAX_SUBTITLE_CHARS = 80
     DEFAULT_CACHE_EXPIRY_DAYS = 7
-    DEFAULT_SEGMENTATION_STRATEGY = "spacy"
-    PROCESSING_CONSTANTS = {
-        'merge_word_threshold': 5,
-        'final_punctuation': '.?!。？！…',
-        'max_punctuation_per_3_words': 1,
-        'max_commas_per_4_words': 1,
-        'fuzzy_match_threshold': 0.8,
-        'min_segment_length': 20,
-        'noise_reduction_factor': 0.3,
-        'speaker_change_threshold': 0.5,
-        'window_size_sec': 0.1,
-    }
 
 # --- Constants ---
 GLOSSARY_FILE_NAME = "src/utils/glossary.json"
+CACHE_DIR = ".cache"
+MERGE_WORD_THRESHOLD = 5
+FINAL_PUNCTUATION = '.?!。？！…'
 
-# Use constants from centralized config
-try:
-    CACHE_DIR = str(get_cache_dir())
-except (ImportError, NameError):
-    CACHE_DIR = ".cache"
-
-# Extract processing constants for easier access
-MERGE_WORD_THRESHOLD = PROCESSING_CONSTANTS['merge_word_threshold']
-FINAL_PUNCTUATION = PROCESSING_CONSTANTS['final_punctuation']
-MAX_PUNCTUATION_PER_3_WORDS = PROCESSING_CONSTANTS['max_punctuation_per_3_words']
-MAX_COMMAS_PER_4_WORDS = PROCESSING_CONSTANTS['max_commas_per_4_words']
-FUZZY_MATCH_THRESHOLD = PROCESSING_CONSTANTS['fuzzy_match_threshold']
-MIN_SEGMENT_LENGTH = PROCESSING_CONSTANTS['min_segment_length']
-NOISE_REDUCTION_FACTOR = PROCESSING_CONSTANTS['noise_reduction_factor']
-SPEAKER_CHANGE_THRESHOLD = PROCESSING_CONSTANTS['speaker_change_threshold']
-WINDOW_SIZE_SEC = PROCESSING_CONSTANTS['window_size_sec']
+# Segmentation Constants
+MAX_PUNCTUATION_PER_3_WORDS = 1
+MAX_COMMAS_PER_4_WORDS = 1
+FUZZY_MATCH_THRESHOLD = 0.8
+MIN_SEGMENT_LENGTH = 20
+NOISE_REDUCTION_FACTOR = 0.3
+SPEAKER_CHANGE_THRESHOLD = 0.5
+WINDOW_SIZE_SEC = 0.1
 
 # --- Cache Management ---
 def get_audio_hash(audio_path: Path) -> str:
@@ -112,9 +76,9 @@ def get_audio_hash(audio_path: Path) -> str:
         return "no_hash"
 
 def get_cache_path(audio_hash: str, model_name: str, args_hash: str) -> Path:
-    """Generate cache file path using centralized cache directory."""
+    """Generate cache file path."""
     cache_dir = Path(CACHE_DIR)
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(exist_ok=True)
     return cache_dir / f"{audio_hash}_{model_name}_{args_hash}.pkl"
 
 def is_cache_valid(cache_path: Path) -> bool:
@@ -185,17 +149,15 @@ def get_project_paths(input_file_or_project_name: str) -> Dict[str, Path]:
     """Generates all necessary paths from an input file or project name."""
     base_name = Path(input_file_or_project_name).stem
     
-    # Use centralized path constants
+    # Use constants for dynamic paths
     try:
-        from src.utils.constants import get_input_dir, get_output_dir, get_cache_dir
+        from src.utils.constants import get_input_dir, get_output_dir
         input_audio_dir = get_input_dir()
         output_dir = get_output_dir() / base_name
-        cache_base_dir = get_cache_dir()
     except ImportError:
         # Fallback to relative paths if constants not available
         input_audio_dir = Path("input_audio")
         output_dir = Path("output_subtitles") / base_name
-        cache_base_dir = Path(".cache")
     
     # Check if input is a project name (look in input_audio directory)
     if input_audio_dir.exists():
@@ -251,17 +213,8 @@ def normalize_audio_volume(audio: AudioSegment, target_dbfs: float = -20.0) -> A
     change_in_dbfs = target_dbfs - audio.dBFS
     return audio.apply_gain(change_in_dbfs)
 
-def denoise_audio(audio: AudioSegment, strength: float = 0.5, use_ai_separation: bool = False) -> AudioSegment:
-    """Apply noise reduction to audio while preserving low-volume speech."""
-    
-    if use_ai_separation:
-        return extract_vocals_with_spleeter(audio, strength)
-    else:
-        return apply_traditional_denoise(audio, strength)
-
-
-def apply_traditional_denoise(audio: AudioSegment, strength: float) -> AudioSegment:
-    """Traditional gentle noise reduction method."""
+def denoise_audio(audio: AudioSegment, strength: float = 0.5) -> AudioSegment:
+    """Apply gentle noise reduction to audio while preserving low-volume speech."""
     samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
     
     # Use a higher percentile for noise floor to be more conservative
@@ -280,94 +233,6 @@ def apply_traditional_denoise(audio: AudioSegment, strength: float) -> AudioSegm
     denoised_samples = np.clip(denoised_samples, -32767, 32767).astype(np.int16)
     
     return audio._spawn(denoised_samples)
-
-
-def extract_vocals_with_spleeter(audio: AudioSegment, mix_ratio: float) -> AudioSegment:
-    """Extract vocals using AI separation (Spleeter)."""
-    try:
-        import tempfile
-        import os
-        
-        # Check if spleeter is available
-        try:
-            from spleeter.separator import Separator
-            import librosa
-            import soundfile as sf
-        except ImportError:
-            logging.warning("Spleeter not installed, falling back to traditional denoising")
-            return apply_traditional_denoise(audio, mix_ratio)
-        
-        # Create temporary files
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
-            temp_vocal_path = temp_input.name.replace('.wav', '_vocals.wav')
-            
-            # Export original audio to temp file
-            audio.export(temp_input.name, format='wav')
-            
-            # Initialize separator
-            separator = Separator('spleeter:2stems-16kHz')
-            
-            # Load and process audio
-            waveform, sr = librosa.load(temp_input.name, sr=16000, mono=False)
-            
-            # Ensure 2D array for spleeter
-            if waveform.ndim == 1:
-                waveform = waveform[np.newaxis, :]
-            
-            # Separate vocals and accompaniment
-            prediction = separator.separate(waveform)
-            
-            # Extract vocals
-            vocals = prediction['vocals']
-            
-            # Convert to mono if stereo
-            if vocals.shape[0] > 1:
-                vocals_mono = np.mean(vocals, axis=0)
-            else:
-                vocals_mono = vocals[0]
-            
-            # Resample to original sample rate if needed
-            if sr != audio.frame_rate:
-                vocals_resampled = librosa.resample(vocals_mono, orig_sr=sr, target_sr=audio.frame_rate)
-            else:
-                vocals_resampled = vocals_mono
-            
-            # Convert to AudioSegment format
-            vocals_int16 = np.clip(vocals_resampled * 32767, -32767, 32767).astype(np.int16)
-            vocals_audio = audio._spawn(vocals_int16)
-            
-            # Clean up temp files
-            os.unlink(temp_input.name)
-            if os.path.exists(temp_vocal_path):
-                os.unlink(temp_vocal_path)
-            
-            # Mix original and extracted vocals based on mix_ratio
-            # mix_ratio closer to 1.0 = more vocals, less background
-            original_weight = max(0.1, 1.0 - mix_ratio)  # Keep at least 10% original
-            vocal_weight = mix_ratio
-            
-            # Ensure same length - pad shorter audio if needed
-            original_length = len(audio)
-            vocals_length = len(vocals_audio)
-            
-            if vocals_length < original_length:
-                # Pad vocals_audio to match original length
-                padding = AudioSegment.silent(duration=original_length - vocals_length)
-                vocals_audio = vocals_audio + padding
-                logging.warning(f"AI separation result was shorter ({vocals_length}ms vs {original_length}ms), padded with silence")
-            elif vocals_length > original_length:
-                # Trim vocals_audio to match original length
-                vocals_audio = vocals_audio[:original_length]
-                logging.warning(f"AI separation result was longer ({vocals_length}ms vs {original_length}ms), trimmed to match")
-            
-            mixed = (audio * original_weight + vocals_audio * vocal_weight)
-            
-            logging.info(f"AI vocal separation completed (mix ratio: {mix_ratio:.1f})")
-            return mixed
-            
-    except Exception as e:
-        logging.warning(f"AI vocal separation failed: {e}, falling back to traditional denoising")
-        return apply_traditional_denoise(audio, mix_ratio)
 
 def detect_speaker_changes(audio: AudioSegment, min_duration_sec: float) -> List[float]:
     """Detect potential speaker changes in audio."""
@@ -435,27 +300,10 @@ def find_best_split_point(audio: AudioSegment, target_ms: int, window_ms: int) -
         return start_search + silence_middle
 
 def plan_and_split_audio(audio_path: Path, paths: Dict[str, Path], args: argparse.Namespace) -> List[Dict]:
-    """Split audio into chunks and create timing information with comprehensive validation."""
+    """Split audio into chunks and create timing information."""
     logging.info("Loading audio for splitting...")
     audio = AudioSegment.from_file(audio_path)
-    
-    # Comprehensive duration validation and logging
-    duration_ms = len(audio)
-    duration_sec = duration_ms / 1000.0
-    duration_min = duration_sec / 60.0
-    
-    logging.info(f"📊 AUDIO DURATION ANALYSIS:")
-    logging.info(f"   Raw AudioSegment length: {duration_ms} ms")
-    logging.info(f"   Calculated seconds: {duration_sec:.2f} s")
-    logging.info(f"   Calculated minutes: {duration_min:.2f} min")
-    logging.info(f"   Hours equivalent: {duration_min/60:.2f} hours")
-    logging.info(f"   Threshold for chunking: {args.long_audio_threshold} min")
-    
-    # Validate that duration makes sense
-    if duration_sec <= 0:
-        raise ValueError(f"Invalid audio duration: {duration_sec} seconds")
-    if duration_sec > 24 * 3600:  # More than 24 hours
-        logging.warning(f"Unusually long audio detected: {duration_min/60:.2f} hours")
+    duration_min = len(audio) / 60000
     
     # Create timing information
     if duration_min < args.long_audio_threshold:
@@ -502,8 +350,7 @@ def plan_and_split_audio(audio_path: Path, paths: Dict[str, Path], args: argpars
             })
             
             # pbar.update(end_ms - start_ms)
-            chunk_duration_sec = (end_ms - start_ms) / 1000.0
-            logging.info(f"Split chunk {chunk_index}: {start_ms/1000:.2f}s - {end_ms/1000:.2f}s (duration: {chunk_duration_sec:.2f}s)")
+            logging.info(f"Split chunk {chunk_index} at {end_ms / 1000:.2f} seconds.")
             start_ms = end_ms
             chunk_index += 1
         
@@ -538,20 +385,55 @@ def apply_intelligent_punctuation(all_words: List[Dict], segment_boundaries: Lis
     clean_reference_text = " ".join([w["word"] for w in clean_words_for_mapping])
     
     # Step 2: Generate punctuated text based on strategy
-    if strategy == "spacy":
-        # Use Whisper's original punctuation, will be processed by spaCy for sentence segmentation
+    if strategy == "rule_based":
+        # Use Whisper's original punctuation directly
         final_text = " ".join([word["word"].strip() for word in all_words if word["word"].strip()])
-        logging.info(f"Strategy: spaCy - Using Whisper punctuation for spaCy segmentation ({len(final_text)} chars)")
+        logging.info(f"Using Whisper punctuation directly ({len(final_text)} chars)")
         
-    elif strategy == "whisper":
-        # Use Whisper's original segments directly (bypass spaCy)
-        final_text = " ".join([word["word"].strip() for word in all_words if word["word"].strip()])
-        logging.info(f"Strategy: Whisper - Using Whisper segments directly ({len(final_text)} chars)")
+    elif strategy in ["bert_restoration", "hybrid"]:
+        # Segment-by-segment BERT processing with quality checking
+        final_text_parts = []
+        
+        for i, boundary in enumerate(segment_boundaries):
+            start_idx = boundary['start_word_idx']
+            end_idx = boundary['end_word_idx']
+            segment_words = all_words[start_idx:end_idx+1]
+            
+            # Get Whisper's original text for this segment (with punctuation)
+            whisper_segment_text = " ".join([w["word"].strip() for w in segment_words])
+            
+            # Get clean text for BERT (remove punctuation but keep contractions)
+            clean_segment_text = clean_text_for_bert(whisper_segment_text)
+            
+            logging.info(f"Segment {i+1}: Whisper='{whisper_segment_text}' -> Clean='{clean_segment_text}'")
+            
+            try:
+                # Apply BERT punctuation to clean text
+                bert_result = apply_bert_punctuation(clean_segment_text)
+                
+                logging.info(f"Segment {i+1}: BERT result='{bert_result}'")
+                
+                # Check BERT output quality
+                if is_bert_segment_reasonable(bert_result, len(segment_words)):
+                    # Use BERT result
+                    final_text_parts.append(bert_result)
+                    logging.info(f"✅ Using BERT for segment {i+1}")
+                else:
+                    # BERT quality poor, use Whisper original
+                    final_text_parts.append(whisper_segment_text)
+                    logging.info(f"❌ BERT quality poor, using Whisper for segment {i+1}")
+                    
+            except Exception as e:
+                logging.warning(f"BERT failed for segment, using Whisper original: {e}")
+                final_text_parts.append(whisper_segment_text)
+        
+        final_text = " ".join(final_text_parts)
+        logging.info(f"Mixed BERT/Whisper punctuation applied ({len(final_text)} chars)")
         
     else:
-        # Fallback to spaCy strategy
+        # Unknown strategy, fallback to rule-based
+        logging.warning(f"Unknown strategy '{strategy}', falling back to rule_based")
         final_text = " ".join([word["word"].strip() for word in all_words if word["word"].strip()])
-        logging.warning(f"Unknown strategy '{strategy}', falling back to spaCy")
     
     # Return: punctuated text, clean words for mapping, clean text for mapping
     return final_text, clean_words_for_mapping, clean_reference_text
@@ -1568,8 +1450,42 @@ def find_flexible_word_match(target_words: List[str], whisper_words: List[Dict],
     
     return None
 
-# The structure_and_split_segments function is imported from clean_segmentation.py
-# Old complex implementation has been removed and replaced with clean architecture
+def structure_and_split_segments(transcription_result: Dict, max_chars: int, segmentation_strategy: str = "rule_based") -> List[Dict]:
+    """Process subtitles with unified architecture ensuring all paths have proper segment splitting.
+    
+    UNIFIED Architecture:
+    1. Try high-precision path: word-level timestamps + spaCy sentences + precise mapping
+    2. If that fails, use fallback path: Whisper segments + basic punctuation  
+    3. CRITICAL: All paths must end with unified segment splitting and timestamp assignment
+    
+    Args:
+        transcription_result: Whisper transcription result with segments containing words
+        max_chars: Maximum characters per subtitle segment
+        segmentation_strategy: Punctuation strategy ("rule_based", "bert_restoration", "hybrid")
+    
+    Returns:
+        List of subtitle segments with proper length control and timestamps
+    """
+    
+    # Try high-precision path first
+    raw_segments = _try_precision_path(transcription_result, segmentation_strategy)
+    
+    # If precision path failed, use fallback path
+    if not raw_segments:
+        logging.warning("High-precision path failed, using fallback path")
+        raw_segments = _try_fallback_path(transcription_result, segmentation_strategy)
+    
+    # If both paths failed, return empty
+    if not raw_segments:
+        logging.error("Both precision and fallback paths failed")
+        return []
+    
+    # UNIFIED FINAL PROCESSING: All paths must go through this
+    logging.info(f"Applying unified segment splitting to {len(raw_segments)} raw segments")
+    final_segments = _apply_unified_segment_processing(raw_segments, max_chars, transcription_result)
+    
+    logging.info(f"Final result: {len(final_segments)} properly sized subtitle segments")
+    return final_segments
 
 def _try_precision_path(transcription_result: Dict, segmentation_strategy: str) -> List[Dict]:
     """Try high-precision path: word timestamps + spaCy sentences + precise mapping."""
@@ -1931,31 +1847,9 @@ def reconstruct_text_with_punctuation(original_text: str, bert_results: List[Dic
 
 # --- File Saving Utilities ---
 def save_subtitles_to_srt(subs: List[srt.Subtitle], path: str):
-    """Save subtitles in SRT format with validation."""
-    if not subs:
-        logging.warning(f"No subtitles to save to {path}")
-        return
-    
-    # Quick validation before saving
-    valid_subs = []
-    for sub in subs:
-        start_sec = sub.start.total_seconds()
-        end_sec = sub.end.total_seconds()
-        if start_sec < end_sec and sub.content.strip():
-            valid_subs.append(sub)
-        else:
-            logging.warning(f"Skipping invalid subtitle: {start_sec:.3f}s-{end_sec:.3f}s '{sub.content[:20]}...'")
-    
-    if not valid_subs:
-        logging.error(f"No valid subtitles to save to {path}")
-        return
-    
+    """Save subtitles in SRT format."""
     with open(path, "w", encoding="utf-8") as f:
-        f.write(srt.compose(valid_subs))
-    
-    # Log save confirmation
-    max_time = max(sub.end.total_seconds() for sub in valid_subs)
-    logging.info(f"✓ Saved {len(valid_subs)} subtitles to {Path(path).name} (duration: {max_time:.1f}s)")
+        f.write(srt.compose(subs))
 
 def save_subtitles_to_txt(subs: List[srt.Subtitle], path: str):
     """Save subtitles in TXT format."""
@@ -2038,20 +1932,12 @@ def load_progress(output_dir: Path) -> Dict:
 # --- Core Processing Logic ---
 def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace, glossary: dict, timing_info: Dict) -> tuple:
     """Process a single audio chunk and return subtitles with actual duration."""
-    chunk_name = chunk_path.name
-    logging.info(f"🔍 {chunk_name} DEBUG: === Starting process_single_chunk ===")
+    logging.info(f"Processing chunk: {chunk_path.name}")
     
     preprocessed_files_to_keep = []
     
     # 1. Audio Preprocessing
-    logging.info(f"🔍 {chunk_name} DEBUG: Loading audio from {chunk_path}")
-    try:
-        audio = AudioSegment.from_file(chunk_path)
-        logging.info(f"🔍 {chunk_name} DEBUG: Audio loaded successfully, duration = {len(audio)/1000:.2f}s")
-    except Exception as e:
-        logging.error(f"🔥 {chunk_name} FAILED: Audio loading failed: {e}")
-        return [], 0.0, []
-    
+    audio = AudioSegment.from_file(chunk_path)
     audio_to_transcribe = str(chunk_path)
     
     if not args.no_audio_preprocessing:
@@ -2061,8 +1947,7 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
             audio = normalize_audio_volume(audio, args.target_dbfs)
         
         if not args.no_denoise:
-            use_ai = getattr(args, 'use_ai_vocal_separation', False)
-            audio = denoise_audio(audio, args.noise_reduction_strength, use_ai_separation=use_ai)
+            audio = denoise_audio(audio, args.noise_reduction_strength)
         
         if not args.no_speaker_detection:
             changes = detect_speaker_changes(audio, args.min_speaker_duration)
@@ -2089,11 +1974,7 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
             logging.warning("Failed to load from cache, will transcribe fresh")
     
     if result is None:
-        logging.info(f"🔍 {chunk_name} DEBUG: Starting Whisper transcription...")
-        logging.info(f"🔍 {chunk_name} DEBUG: Audio file = {audio_to_transcribe}")
-        logging.info(f"🔍 {chunk_name} DEBUG: Language = {args.source_language}")
-        logging.info(f"🔍 {chunk_name} DEBUG: Word timestamps = {args.word_timestamps}")
-        
+        logging.info("Transcribing with Whisper model...")
         try:
             result = model.transcribe(
                 audio_to_transcribe,
@@ -2109,55 +1990,16 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
                 no_speech_threshold=1.0,
                 logprob_threshold=-2.0
             )
-            
-            logging.info(f"🔍 {chunk_name} DEBUG: Whisper transcription completed")
-            logging.info(f"🔍 {chunk_name} DEBUG: Result type = {type(result)}")
-            logging.info(f"🔍 {chunk_name} DEBUG: Result is None = {result is None}")
-            
             if result:
-                logging.info(f"🔍 {chunk_name} DEBUG: Result keys = {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-                if isinstance(result, dict) and 'segments' in result:
-                    logging.info(f"🔍 {chunk_name} DEBUG: Found {len(result['segments'])} segments")
-                    for i, seg in enumerate(result['segments'][:3]):  # 只log前3个segment
-                        logging.info(f"🔍 {chunk_name} DEBUG: Segment {i}: '{seg.get('text', 'NO_TEXT')[:50]}...'")
-                        if 'words' in seg:
-                            logging.info(f"🔍 {chunk_name} DEBUG: Segment {i} has {len(seg['words'])} words")
-                        else:
-                            logging.info(f"🔍 {chunk_name} DEBUG: Segment {i} has NO WORDS")
                 save_to_cache(cache_path, result)
             else:
                 # This is the critical failure point for chunk_1
-                logging.error(f"🔥 {chunk_name} FAILED: Whisper returned None result (silence or no speech detection)")
-                logging.error(f"🔥 {chunk_name} FAILED: FORCING subtitle generation anyway to prevent missing chunk")
-                
-                # 创建一个基本的fallback字幕，确保chunk不会完全丢失
-                duration_sec = len(audio) / 1000.0
-                chunk_start_time_sec = timing_info.get('start_time_ms', 0) / 1000.0
-                fallback_subtitle = srt.Subtitle(
-                    index=1,
-                    start=datetime.timedelta(seconds=chunk_start_time_sec),
-                    end=datetime.timedelta(seconds=chunk_start_time_sec + duration_sec),
-                    content="[No speech detected in this segment]"
-                )
-                logging.info(f"🔥 {chunk_name} FAILED: Created fallback subtitle with proper timestamps to prevent chunk loss")
-                return [fallback_subtitle], duration_sec, preprocessed_files_to_keep
+                logging.error("Whisper returned a None result, likely due to silence or no speech detection.")
+                return [], 0.0, preprocessed_files_to_keep # Return gracefully
 
         except Exception as e:
-            import traceback
-            logging.error(f"🔥 {chunk_name} FAILED: Transcription exception: {e}")
-            logging.error(f"🔥 {chunk_name} FAILED: Transcription traceback: {traceback.format_exc()}")
-            logging.error(f"🔥 {chunk_name} FAILED: FORCING fallback subtitle generation to prevent chunk loss")
-            
-            # 创建fallback字幕即使转录完全失败
-            duration_sec = len(audio) / 1000.0
-            chunk_start_time_sec = timing_info.get('start_time_ms', 0) / 1000.0
-            fallback_subtitle = srt.Subtitle(
-                index=1,
-                start=datetime.timedelta(seconds=chunk_start_time_sec),
-                end=datetime.timedelta(seconds=chunk_start_time_sec + duration_sec),
-                content=f"[Transcription failed: {str(e)[:100]}]"
-            )
-            return [fallback_subtitle], duration_sec, preprocessed_files_to_keep
+            logging.error(f"Transcription failed: {e}")
+            return [], len(audio) / 1000.0, preprocessed_files_to_keep
     
     # Add debug log
     logging.info(f"Whisper result type: {type(result)}")
@@ -2175,58 +2017,15 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
         return [], len(audio) / 1000.0, preprocessed_files_to_keep
     
     # 3. Structure and format subtitles
-    logging.info(f"🔍 {chunk_name} DEBUG: Starting segmentation with strategy '{args.segmentation_strategy}'")
-    logging.info(f"🔍 {chunk_name} DEBUG: Max chars = {args.max_subtitle_chars}")
-    
-    try:
-        structured_segments = structure_and_split_segments(result, args.max_subtitle_chars, args.segmentation_strategy)
-        logging.info(f"🔍 {chunk_name} DEBUG: Segmentation completed successfully")
-        logging.info(f"🔍 {chunk_name} DEBUG: Generated {len(structured_segments)} structured segments")
-    except Exception as e:
-        import traceback
-        logging.error(f"🔥 {chunk_name} FAILED: Segmentation failed: {e}")
-        logging.error(f"🔥 {chunk_name} FAILED: Segmentation traceback: {traceback.format_exc()}")
-        logging.error(f"🔥 {chunk_name} FAILED: This might be the NoneType subscriptable error!")
-        logging.error(f"🔥 {chunk_name} FAILED: FORCING fallback subtitle generation to prevent chunk loss")
-        
-        # 即使segmentation失败也生成基本字幕
-        duration_sec = len(audio) / 1000.0
-        chunk_start_time_sec = timing_info.get('start_time_ms', 0) / 1000.0
-        fallback_subtitle = srt.Subtitle(
-            index=1,
-            start=datetime.timedelta(seconds=chunk_start_time_sec),
-            end=datetime.timedelta(seconds=chunk_start_time_sec + duration_sec),
-            content=f"[Segmentation failed: {str(e)[:100]}]"
-        )
-        return [fallback_subtitle], duration_sec, preprocessed_files_to_keep
-    
-    # Extract chunk start time for proper timestamp offset with enhanced validation
-    chunk_start_time_ms = timing_info.get('start_time_ms', 0)
-    chunk_start_time_sec = chunk_start_time_ms / 1000.0
-    chunk_duration_ms = timing_info.get('duration_ms', 0)
-    chunk_duration_sec = chunk_duration_ms / 1000.0
-    chunk_end_time_sec = chunk_start_time_sec + chunk_duration_sec
-    
-    logging.info(f"📊 {chunk_name} TIMING VALIDATION:")
-    logging.info(f"   Chunk index: {timing_info.get('chunk_index', 'unknown')}")
-    logging.info(f"   Chunk start: {chunk_start_time_sec:.3f}s ({chunk_start_time_ms}ms)")
-    logging.info(f"   Chunk duration: {chunk_duration_sec:.3f}s ({chunk_duration_ms}ms)")
-    logging.info(f"   Chunk expected end: {chunk_end_time_sec:.3f}s")
-    logging.info(f"   Audio file duration: {len(audio)/1000:.3f}s")
+    structured_segments = structure_and_split_segments(result, args.max_subtitle_chars, args.segmentation_strategy)
+    logging.info(f"Structured segments count: {len(structured_segments)}")
     
     subtitles = []
-    for i, seg in enumerate(structured_segments):
-        logging.info(f"🔍 {chunk_name} DEBUG: Processing structured segment {i}")
-        logging.info(f"🔍 {chunk_name} DEBUG: Segment keys = {list(seg.keys()) if isinstance(seg, dict) else 'Not a dict'}")
-        
-        if not isinstance(seg, dict) or 'text' not in seg:
-            logging.error(f"🔥 {chunk_name} FAILED: Invalid segment structure: {seg}")
-            continue
-            
+    for seg in structured_segments:
         original = seg['text'].strip()
-        logging.info(f"🔍 {chunk_name} DEBUG: Segment text: '{original[:50]}...' (length: {len(original)})")
+        logging.info(f"Processing segment text: '{original}' (length: {len(original)})")
         if not original:
-            logging.info(f"🔍 {chunk_name} DEBUG: Skipping empty segment text")
+            logging.info("Skipping empty segment text")
             continue
         
         # Apply glossary
@@ -2263,82 +2062,27 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
         else:  # source
             content = final_processed
         
-        # Apply chunk time offset to get absolute timestamps with validation
-        relative_start = seg.get('start', 0.0)
-        relative_end = seg.get('end', 0.0)
-        absolute_start = chunk_start_time_sec + relative_start
-        absolute_end = chunk_start_time_sec + relative_end
-        
-        logging.info(f"🔍 {chunk_name} Segment {i} RAW DATA: {seg}")
-        
-        # Validate segment timing
-        if relative_end <= relative_start:
-            logging.warning(f"⚠️ {chunk_name} Invalid segment timing: end ({relative_end:.3f}s) <= start ({relative_start:.3f}s)")
-            continue
-        if relative_end > chunk_duration_sec + 10.0:  # Allow 10s tolerance for debugging
-            logging.error(f"🚨 {chunk_name} CRITICAL: Segment extends WAY beyond chunk duration!")
-            logging.error(f"   Relative end: {relative_end:.3f}s")
-            logging.error(f"   Chunk duration: {chunk_duration_sec:.3f}s")
-            logging.error(f"   Difference: {relative_end - chunk_duration_sec:.3f}s")
-            logging.error(f"   This is likely the cause of the '2 hour problem'!")
-            
-        if absolute_end > chunk_end_time_sec + 10.0:  # Check absolute timing too
-            logging.error(f"🚨 {chunk_name} CRITICAL: Absolute timestamp way beyond expected!")
-            logging.error(f"   Absolute end: {absolute_end:.3f}s ({absolute_end/60:.1f}min)")
-            logging.error(f"   Expected chunk end: {chunk_end_time_sec:.3f}s ({chunk_end_time_sec/60:.1f}min)")
-            
-        logging.info(f"🕰️ {chunk_name} Segment {i}: relative={relative_start:.3f}-{relative_end:.3f}s, absolute={absolute_start:.3f}-{absolute_end:.3f}s, duration={relative_end-relative_start:.3f}s")
-        
         subtitle = srt.Subtitle(
             index=0,  # Will be re-indexed later
-            start=datetime.timedelta(seconds=absolute_start),
-            end=datetime.timedelta(seconds=absolute_end),
+            start=datetime.timedelta(seconds=seg['start']),
+            end=datetime.timedelta(seconds=seg['end']),
             content=content
         )
         subtitles.append(subtitle)
     
-    # --- Enhanced validation step for subtitles ---
+    # --- Add validation step for subtitles ---
     validated_subtitles = []
-    max_timestamp = 0.0
-    
     for sub in subtitles:
-        start_sec = sub.start.total_seconds()
-        end_sec = sub.end.total_seconds()
-        
-        if start_sec < end_sec:
+        if sub.start < sub.end:
             validated_subtitles.append(sub)
-            max_timestamp = max(max_timestamp, end_sec)
         else:
             logging.warning(
                 f"Invalid subtitle timing detected and skipped: "
-                f"start={start_sec:.3f}s, end={end_sec:.3f}s, content='{sub.content[:20]}...'"
+                f"start={sub.start}, end={sub.end}, content='{sub.content[:20]}...'"
             )
-    
+    # --- End validation step ---
+
     actual_duration_sec = len(audio) / 1000.0
-    
-    # Use the more reliable timing info from chunk_timing.json
-    # Instead of actual audio duration which may have been altered by preprocessing
-    expected_chunk_end = chunk_end_time_sec
-    expected_max_reasonable = chunk_start_time_sec + actual_duration_sec
-    
-    logging.info(f"📊 {chunk_name} FINAL TIMING SUMMARY:")
-    logging.info(f"   Generated subtitles: {len(validated_subtitles)}")
-    logging.info(f"   Max subtitle timestamp: {max_timestamp:.3f}s")
-    logging.info(f"   Expected chunk end (timing_info): {expected_chunk_end:.3f}s")
-    logging.info(f"   Expected max (audio length): {expected_max_reasonable:.3f}s")
-    logging.info(f"   Chunk start: {chunk_start_time_sec:.3f}s")
-    logging.info(f"   Actual audio duration: {actual_duration_sec:.3f}s")
-    logging.info(f"   Timing info duration: {chunk_duration_sec:.3f}s")
-    
-    # More lenient validation - use the larger of the two expected values plus tolerance
-    max_reasonable_timestamp = max(expected_chunk_end, expected_max_reasonable) + 10.0  # 10s tolerance
-    
-    if max_timestamp > max_reasonable_timestamp:
-        logging.warning(f"⚠️ Subtitle timestamps significantly beyond reasonable range: {max_timestamp:.3f}s > {max_reasonable_timestamp:.3f}s")
-        logging.warning(f"   This may indicate a serious timestamp calculation error")
-    elif max_timestamp > expected_chunk_end + 5.0:  # 5s tolerance for normal variance
-        logging.info(f"ℹ️ Subtitle timestamps extend slightly beyond chunk boundary: {max_timestamp:.3f}s > {expected_chunk_end:.3f}s (likely due to preprocessing)")
-    
     return validated_subtitles, actual_duration_sec, preprocessed_files_to_keep
 
 def process_chunk_with_offset(task_info: dict) -> dict:
@@ -2349,27 +2093,14 @@ def process_chunk_with_offset(task_info: dict) -> dict:
     glossary = task_info['glossary']
     timing_info = task_info['timing_info']
     
-    # DEBUG: 添加详细的chunk处理跟踪
-    logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Starting processing")
-    logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Audio path = {chunk_path}")
-    logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Audio exists = {chunk_path.exists()}")
-    if chunk_path.exists():
-        audio_size_mb = chunk_path.stat().st_size / (1024 * 1024)
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Audio size = {audio_size_mb:.2f} MB")
-    
     try:
         # Load model in thread for thread safety
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Loading Whisper model...")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = whisper.load_model(args.model, device=device)
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Whisper model loaded successfully")
         
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Starting process_single_chunk...")
         subs, actual_duration, preprocessed_files = process_single_chunk(
             chunk_path, model, args, glossary, timing_info
         )
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: process_single_chunk completed")
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Generated {len(subs)} subtitles")
         
         return {
             "index": chunk_index,
@@ -2379,9 +2110,7 @@ def process_chunk_with_offset(task_info: dict) -> dict:
             "status": "ok"
         }
     except Exception as e:
-        import traceback
-        logging.error(f"🔥 CHUNK {chunk_index} FAILED: {e}")
-        logging.error(f"🔥 CHUNK {chunk_index} TRACEBACK: {traceback.format_exc()}")
+        logging.error(f"Failed to process chunk {chunk_index}: {e}")
         return {
             "index": chunk_index,
             "subs": [],
@@ -2402,41 +2131,14 @@ def run_main_workflow(args: argparse.Namespace):
     # Extract audio if needed
     if not paths["extracted_audio"].exists():
         logging.info("Extracting audio from input file...")
-        
-        # First, probe the input file for detailed info
-        probe_cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(paths["input_file"])]
-        try:
-            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
-            import json
-            probe_data = json.loads(probe_result.stdout)
-            
-            # Log original file info
-            if 'format' in probe_data:
-                duration = float(probe_data['format'].get('duration', 0))
-                logging.info(f"Original file duration: {duration:.2f} seconds ({duration/60:.1f} minutes)")
-            
-            # Find audio streams
-            audio_streams = [s for s in probe_data.get('streams', []) if s.get('codec_type') == 'audio']
-            for i, stream in enumerate(audio_streams):
-                logging.info(f"Audio stream {i}: {stream.get('codec_name')}, {stream.get('sample_rate')}Hz, {stream.get('channels')} channels")
-                
-        except Exception as e:
-            logging.warning(f"Could not probe input file: {e}")
-        
         cmd = [
             'ffmpeg', '-i', str(paths["input_file"]),
-            '-vn', '-acodec', 'pcm_s16le', 
+            '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1',
             '-y', str(paths["extracted_audio"])
         ]
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             logging.info("Audio extraction completed.")
-            
-            # Verify extracted audio
-            extracted_audio = AudioSegment.from_file(paths["extracted_audio"])
-            extracted_duration = len(extracted_audio) / 1000.0
-            logging.info(f"Extracted audio duration: {extracted_duration:.2f} seconds ({extracted_duration/60:.1f} minutes)")
-            
         except subprocess.CalledProcessError as e:
             logging.error(f"Audio extraction failed: {e}")
             sys.exit(1)
@@ -2487,42 +2189,34 @@ def run_main_workflow(args: argparse.Namespace):
             logging.info(f"Starting processing with {max_workers} worker(s)...")
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # 创建future到task的映射来正确跟踪哪个chunk失败了
-                future_to_task = {executor.submit(process_chunk_with_offset, task): task for task in tasks}
+                futures = [executor.submit(process_chunk_with_offset, task) for task in tasks]
                 
                 completed_results = []
                 failed_tasks = []
                 
-                for future in tqdm(as_completed(future_to_task), total=len(tasks), desc="Processing chunks"):
-                    task = future_to_task[future]
-                    chunk_index = task['index']
+                for i, future in enumerate(tqdm(as_completed(futures), total=len(tasks), desc="Processing chunks")):
                     try:
                         result = future.result()
                         completed_results.append(result)
-                        logging.info(f"✅ CHUNK {chunk_index} completed successfully")
                     except Exception as e:
-                        logging.error(f"🔥 CHUNK {chunk_index} failed with exception: {e}")
-                        failed_tasks.append(task)
+                        logging.error(f"Task {i+1} failed with exception: {e}")
+                        failed_tasks.append(tasks[i])
                 
                 all_results = completed_results
                 
                 # If we have failures and using multiple workers, try single worker for failed tasks
                 if failed_tasks and max_workers > 1:
-                    failed_chunk_indices = [task['index'] for task in failed_tasks]
-                    logging.warning(f"Chunks {failed_chunk_indices} failed with {max_workers} workers. Retrying with single worker...")
+                    logging.warning(f"{len(failed_tasks)} tasks failed with {max_workers} workers. Retrying failed tasks with single worker...")
                     
                     with ThreadPoolExecutor(max_workers=1) as single_executor:
-                        retry_future_to_task = {single_executor.submit(process_chunk_with_offset, task): task for task in failed_tasks}
+                        retry_futures = [single_executor.submit(process_chunk_with_offset, task) for task in failed_tasks]
                         
-                        for future in tqdm(as_completed(retry_future_to_task), total=len(failed_tasks), desc="Retrying failed chunks"):
-                            task = retry_future_to_task[future]
-                            chunk_index = task['index']
+                        for future in tqdm(as_completed(retry_futures), total=len(failed_tasks), desc="Retrying failed chunks"):
                             try:
                                 result = future.result()
                                 all_results.append(result)
-                                logging.info(f"✅ CHUNK {chunk_index} retry succeeded")
                             except Exception as e:
-                                logging.error(f"🔥 CHUNK {chunk_index} retry also failed: {e}")
+                                logging.error(f"Retry also failed: {e}")
                 
                 break  # Success, exit retry loop
                 
@@ -2538,46 +2232,27 @@ def run_main_workflow(args: argparse.Namespace):
     # Sort results by chunk index for proper sequence
     all_results.sort(key=lambda r: r['index'])
     
-    # Log processing summary with enhanced metrics
+    # Log processing summary
     successful_chunks = len([r for r in all_results if r['status'] == 'ok'])
-    failed_chunks = len([r for r in all_results if r['status'] == 'error'])
     total_chunks = len(tasks)
+    logging.info(f"Processing completed: {successful_chunks}/{total_chunks} chunks processed successfully")
     
-    logging.info(f"📊 CHUNK PROCESSING SUMMARY:")
-    logging.info(f"   Successful: {successful_chunks}/{total_chunks} chunks")
-    if failed_chunks > 0:
-        logging.warning(f"   Failed: {failed_chunks} chunks")
-        failed_indices = [r['index'] for r in all_results if r['status'] == 'error']
-        logging.warning(f"   Failed chunk indices: {failed_indices}")
-    
-    # Combine results and apply timing offsets with validation
+    # Combine results and apply timing offsets
     all_subs = []
     processed_chunks = []
     all_preprocessed_files = []
-    timing_validation_warnings = 0
     
     for result in all_results:
         if result['status'] == 'ok' and result['subs']:
             chunk_index = result['index']
             start_time_sec = chunk_start_times.get(chunk_index, 0.0)
+            time_offset = datetime.timedelta(seconds=start_time_sec)
             
-            # FIXED: Remove duplicate time offset application
-            # Subtitles already have absolute timestamps from process_single_chunk()
-            chunk_sub_count = 0
+            # Apply time offset to each subtitle
             for sub in result['subs']:
-                start_sec = sub.start.total_seconds()
-                end_sec = sub.end.total_seconds()
-                
-                # Validate timing (should already be absolute timestamps)
-                if start_sec >= end_sec:
-                    logging.warning(f"⚠️ Chunk {chunk_index} invalid timing: {start_sec:.3f}s >= {end_sec:.3f}s")
-                    timing_validation_warnings += 1
-                    continue
-                
+                sub.start += time_offset
+                sub.end += time_offset
                 all_subs.append(sub)
-                chunk_sub_count += 1
-            
-            logging.info(f"✓ Chunk {chunk_index}: {chunk_sub_count} subtitles, already absolute timestamps")
             
             processed_chunks.append(chunk_index)
             all_preprocessed_files.extend(result['preprocessed_files'])
@@ -2624,40 +2299,6 @@ def run_main_workflow(args: argparse.Namespace):
     else:
         logging.info(f"Kept {len(all_preprocessed_files)} preprocessed files for reprocessing")
     
-    # Final comprehensive validation and summary
-    if all_subs:
-        max_timestamp = max(sub.end.total_seconds() for sub in all_subs)
-        total_duration_hours = max_timestamp / 3600.0
-        
-        # Get original audio duration for validation
-        try:
-            original_audio = AudioSegment.from_file(paths["extracted_audio"])
-            extracted_duration = len(original_audio) / 1000.0
-            original_duration_hours = extracted_duration / 3600.0
-        except Exception as e:
-            logging.warning(f"Could not get original audio duration for validation: {e}")
-            extracted_duration = max_timestamp  # Fallback
-            original_duration_hours = total_duration_hours
-        
-        logging.info(f"🏁 FINAL PROCESSING VALIDATION:")
-        logging.info(f"   Original audio: {extracted_duration:.1f}s ({extracted_duration/60:.1f}min, {original_duration_hours:.2f}h)")
-        logging.info(f"   Subtitle span: {max_timestamp:.1f}s ({max_timestamp/60:.1f}min, {total_duration_hours:.2f}h)")
-        logging.info(f"   Total subtitles: {len(all_subs)}")
-        logging.info(f"   Processed chunks: {successful_chunks}/{total_chunks}")
-        
-        duration_diff = abs(max_timestamp - extracted_duration)
-        if duration_diff > 60.0:  # More than 1 minute difference
-            logging.warning(f"⚠️ DURATION MISMATCH DETECTED!")
-            logging.warning(f"   Difference: {duration_diff:.1f}s ({duration_diff/60:.1f}min)")
-            logging.warning(f"   This may indicate timing calculation issues!")
-        
-        # Check for potential timestamp duplication
-        timestamps = [sub.start.total_seconds() for sub in all_subs]
-        unique_timestamps = set(timestamps)
-        if len(timestamps) != len(unique_timestamps):
-            duplicates = len(timestamps) - len(unique_timestamps)
-            logging.warning(f"⚠️ DUPLICATE TIMESTAMPS: {duplicates} duplicate start times detected")
-    
     logging.info(f"✨ Processing completed successfully! ✨")
     logging.info(f"Final subtitles saved to: {paths['final_srt']}")
     logging.info(f"Total subtitles generated: {len(all_subs)}")
@@ -2678,10 +2319,10 @@ if __name__ == "__main__":
     parser.add_argument("--chunk_duration", type=int, default=DEFAULT_CHUNK_DURATION, help="Target chunk duration in minutes")
     parser.add_argument("--search_window", type=int, default=DEFAULT_SEARCH_WINDOW, help="Search window in seconds for optimal split points")
     parser.add_argument("--max_subtitle_chars", type=int, default=DEFAULT_MAX_SUBTITLE_CHARS, help="Maximum characters per subtitle line")
-    parser.add_argument("--segmentation_strategy", default=DEFAULT_SEGMENTATION_STRATEGY, choices=['spacy', 'whisper'], help="Sentence segmentation strategy")
+    parser.add_argument("--segmentation_strategy", default="rule_based", choices=['rule_based', 'bert_restoration', 'hybrid'], help="Sentence segmentation strategy")
     
     # Performance and parallel processing
-    parser.add_argument("--max_workers", type=int, default=1, help="Maximum parallel workers for chunk processing")
+    parser.add_argument("--max_workers", type=int, default=2, help="Maximum parallel workers for chunk processing")
     parser.add_argument("--no_parallel_processing", action="store_true", help="Disable parallel processing")
     
     # Audio preprocessing
@@ -2689,7 +2330,6 @@ if __name__ == "__main__":
     parser.add_argument("--no_normalize_audio", action="store_true", help="Disable volume normalization")
     parser.add_argument("--no_denoise", action="store_true", help="Disable noise reduction")
     parser.add_argument("--noise_reduction_strength", type=float, default=0.5, help="Noise reduction strength (0.1-1.0)")
-    parser.add_argument("--use_ai_vocal_separation", action="store_true", help="Use AI vocal separation instead of traditional denoising")
     parser.add_argument("--target_dbfs", type=float, default=-20.0, help="Target dBFS for volume normalization")
     parser.add_argument("--no_speaker_detection", action="store_true", help="Disable speaker change detection")
     parser.add_argument("--min_speaker_duration", type=float, default=2.0, help="Minimum duration between speaker changes (seconds)")

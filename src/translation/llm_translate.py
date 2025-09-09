@@ -35,8 +35,12 @@ from typing import List, Dict, Optional
 import requests
 import srt
 
-# Configuration
-OUTPUT_BASE_DIR = "output_subtitles"
+# Configuration - use dynamic paths
+try:
+    from src.utils.constants import get_output_dir, OUTPUT_DIR_NAME
+    OUTPUT_BASE_DIR = OUTPUT_DIR_NAME  # For backward compatibility
+except ImportError:
+    OUTPUT_BASE_DIR = "output_subtitles"
 LLM_OUTPUT_SUBDIR = "local_llm"  # Local LLM translations
 DEFAULT_MODEL = "qwen2.5:7b"  # Recommended for Chinese translation
 OLLAMA_BASE_URL = "http://localhost:11434"
