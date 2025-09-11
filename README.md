@@ -1,67 +1,88 @@
-# SubGenie - Subtitle Generation & Translation Tool (English)
+# SubGenie - AI-Powered Subtitle Generator
 
-SubGenie is a desktop application for generating, translating, and refining subtitles for audio and video files. It uses OpenAI's Whisper for transcription and supports various local and API-based LLMs for translation.
+**SubGenie** is a desktop application designed for content creators to generate, translate, and refine subtitles from audio/video files using state-of-the-art AI models. It specializes in gaming content with extensive terminology support for Minecraft, speedrunning, and streaming contexts.
 
-## Features
+## 🚀 Features
 
-- **Transcription**: Uses OpenAI's Whisper models (tiny to large-v3) with word-level timestamps.
-- **Smart Segmentation**: Advanced spaCy-based grammar segmentation for natural sentence boundaries.
-- **Translation**: Supports local LLMs via Ollama, commercial APIs (e.g., DeepSeek, Gemini), and a basic free translation mode.
-- **GUI**: A graphical user interface built with CustomTkinter with real-time processing logs.
-- **Output Formats**: Supports SRT, VTT, ASS, TXT, and JSON formats.
-- **Project Management**: Organizes files into project folders with chunk-based processing.
-- **Audio Preprocessing**: Includes options for volume normalization and noise reduction.
-- **Robust Timestamp Matching**: Sliding window algorithm for precise word-to-sentence timestamp alignment.
-- **Flexible Processing**: Parallel chunk processing with error recovery and reprocessing capabilities.
-- **Glossary**: Allows custom translation rules via `src/utils/glossary.json`.
+### Core Functionality
+- **Advanced ASR**: Uses OpenAI Whisper with WhisperX forced alignment for word-level timestamps
+- **Smart Segmentation**: Grammar-aware sentence splitting using spaCy NLP with 5-tier priority system
+- **Multi-format Output**: SRT, VTT, ASS, TXT, JSON subtitle formats
+- **Bilingual Subtitles**: Automatic translation with gaming-specific terminology
+- **Chunk Processing**: Handles long audio files (>15min) with automatic chunking
 
-## Installation Guide
+### Translation System
+- **Local LLM Support**: Ollama integration for free, offline translation
+- **Commercial APIs**: OpenAI, Anthropic, Google Gemini, DeepSeek support
+- **Gaming Glossary**: 700+ term dictionary for gaming/streaming content
+- **Context-Aware**: Specialized prompts for gaming, speedrunning, and creator content
 
-### 1. Prerequisites
+### Gaming Content Specialization  
+- **Creator Names**: Proper handling of content creator identities
+- **Minecraft Terminology**: Blocks, items, mechanics, speedrunning terms
+- **Streaming Context**: Chat interactions, donations, subscriber content
+- **Community Terms**: Dream SMP, popular gaming phrases and slang
 
-- **Python**: Version 3.9 or higher.
-- **FFmpeg**: Required for audio processing.
-  - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to your system's PATH, or install via a package manager like Chocolatey (`choco install ffmpeg`).
-  - **macOS**: Install using Homebrew: `brew install ffmpeg`.
-  - **Linux (Debian/Ubuntu)**: Install using apt: `sudo apt install ffmpeg`.
-- **Ollama** (Optional): Required only for using local LLMs for translation. Install from [ollama.com](https://ollama.com/).
+## 📦 Installation
 
-### 2. Setup
+### Prerequisites
+- **Python 3.8+**
+- **FFmpeg** (system dependency for audio processing)
+- **Conda/Anaconda** (recommended for environment management)
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/elevenisrising/SubGenie.git
-    cd SubGenie
-    ```
+### Required Python Packages
+```bash
+# Core dependencies
+pip install openai-whisper whisperx
+pip install spacy && python -m spacy download en_core_web_sm
+pip install customtkinter pillow
+pip install pydub torch torchaudio
+pip install srt deep-translator requests
+pip install numpy tqdm
 
-2.  **Create and activate a Python environment:**
-    - Using **conda** (recommended):
-      ```bash
-      conda create -n subgenie python=3.10 -y
-      conda activate subgenie
-      ```
-    - Using **venv**:
-      ```bash
-      python -m venv .venv
-      # On Windows: .venv\Scripts\activate
-      # On macOS/Linux: source .venv/bin/activate
-      ```
+# Optional for GPU acceleration
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
 
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+### Quick Setup
+```bash
+# Clone repository
+git clone <repository-url>
+cd SubGenie
 
-4.  **Download the spaCy NLP model:**
-    This is required for advanced grammar-based sentence segmentation.
-    ```bash
-    python -m spacy download en_core_web_sm
-    ```
+# Install dependencies
+pip install -r requirements.txt
 
-### 3. Launching the Application
+# Download spaCy model
+python -m spacy download en_core_web_sm
 
--   **Windows**: Double-click `start_gui.bat`.
--   **macOS/Linux**: Run `python main_gui.py` in your terminal.
+# Launch GUI
+python main_gui.py
+```
+
+## 🎯 Usage
+
+### GUI Application (Recommended)
+```bash
+# Windows (with Conda)
+start_gui.bat
+
+# Cross-platform
+python main_gui.py
+python subgenie.py  # Alternative entry point
+```
+
+### CLI Processing
+```bash
+# Basic transcription
+python src/processing/main.py input.mp4 --model medium
+
+# With translation
+python src/processing/main.py input.mp4 --model large-v3 --target-language zh-CN
+
+# Custom settings
+python src/processing/main.py input.mp4 --max_subtitle_chars 60 --chunk_duration 20
+```
 
 ## Usage Manual
 

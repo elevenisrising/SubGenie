@@ -14,6 +14,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 # Try to import spaCy - make it optional for now
 spacy = None
 nlp = None
@@ -42,7 +47,6 @@ except ImportError:
 import numpy as np
 import srt
 import torch
-import whisper
 from deep_translator import GoogleTranslator
 from pydub import AudioSegment
 from pydub.effects import normalize
@@ -51,7 +55,34 @@ from tqdm import tqdm
 
 # --- Configuration ---
 LOG_FORMAT = '%(asctime)s - [%(levelname)s] - %(message)s'
-logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
+# Configure logging to write to file AND console
+import os
+from pathlib import Path
+
+# Ensure logs directory exists
+log_dir = Path(__file__).parent.parent.parent / "logs"
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / "timestamp_debug.log"
+
+# Set up file handler
+file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')  # 'w' to overwrite each run
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+
+# Set up console handler (optional, for immediate feedback)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.WARNING)  # Only show warnings/errors on console
+console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+
+# Configure root logger  
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.DEBUG)  # Enable DEBUG level for normalization logs
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
+logging.info(f"🚀 DEBUG: Timestamp debug logging started - output file: {log_file}")
+logging.info("🚀 DEBUG: This session will contain detailed alignment debugging information")
 
 # Import constants
 try:
@@ -561,21 +592,31 @@ def clean_text_for_bert(text: str) -> str:
     if not text or not text.strip():
         return ""
     
+    original_text = text
+    logging.info(f"🧹 DEBUG: Text cleaning - Original: '{original_text[:100]}{'...' if len(original_text) > 100 else ''}'")
+    
     # Step 1: Normalize different quote/apostrophe types to standard ASCII
     text = text.replace(''', "'").replace(''', "'")  # Smart quotes to ASCII
     text = text.replace('"', '"').replace('"', '"')  # Smart double quotes
     text = text.replace('—', '-').replace('–', '-')  # Em/en dash to hyphen
+    logging.info(f"🧹 DEBUG: After quote normalization: '{text[:100]}{'...' if len(text) > 100 else ''}'")
     
     # Step 2: Remove punctuation but keep apostrophes and hyphens for contractions
     cleaned = re.sub(r'[^\w\s\'-]', '', text)
+    logging.info(f"🧹 DEBUG: After punctuation removal: '{cleaned[:100]}{'...' if len(cleaned) > 100 else ''}'")
     
     # Step 3: Normalize whitespace (multiple spaces to single space)
     cleaned = ' '.join(cleaned.split())
     
     # Step 4: Handle edge cases
     cleaned = cleaned.strip()
+    final_text = cleaned
     
-    return cleaned
+    logging.info(f"🧹 DEBUG: Final cleaned text: '{final_text[:100]}{'...' if len(final_text) > 100 else ''}'")
+    if original_text.strip() != final_text:
+        logging.info(f"🧹 DEBUG: Text changed during cleaning: {len(original_text)} -> {len(final_text)} chars")
+    
+    return final_text
 
 def create_clean_words_for_mapping(segment_words: List[Dict]) -> List[Dict]:
     """Create cleaned version of words (no punctuation) for timestamp mapping."""
@@ -670,7 +711,12 @@ def map_sentences_to_word_timestamps(sentences: List[str], clean_words_for_mappi
         )
         
         if start_word_idx == -1 or end_word_idx == -1:
-            logging.warning(f"Could not map character positions to words for: '{sentence_for_matching}'")
+            logging.warning(f"📍 DEBUG: Could not map character positions to words for: '{sentence_for_matching}'")
+            logging.warning(f"📍 DEBUG: Character positions - start: {start_pos}, end: {end_pos}")
+            logging.warning(f"📍 DEBUG: Word mapping result - start_idx: {start_word_idx}, end_idx: {end_word_idx}")
+            logging.warning(f"📍 DEBUG: Total clean words available: {len(clean_words_for_mapping)}")
+            if clean_words_for_mapping:
+                logging.warning(f"📍 DEBUG: First few words: {[w.get('word', '') for w in clean_words_for_mapping[:5]]}")
             continue
         
         # Mark positions as used
@@ -690,13 +736,20 @@ def map_sentences_to_word_timestamps(sentences: List[str], clean_words_for_mappi
 def find_available_position(target_text: str, reference_text: str, used_positions: set) -> int:
     """Find next available position for target_text in reference_text with intelligent matching."""
     if not target_text or not reference_text:
+        logging.warning(f"🔍 DEBUG: find_available_position called with empty text - target: '{target_text}', reference length: {len(reference_text) if reference_text else 0}")
         return -1
+    
+    logging.info(f"🔍 DEBUG: Finding position for target: '{target_text[:50]}{'...' if len(target_text) > 50 else ''}'")
+    logging.info(f"🔍 DEBUG: Reference text length: {len(reference_text)}, used positions: {len(used_positions)}")
     
     # Normalize both texts for comparison
     target_normalized = clean_text_for_bert(target_text).strip()
     reference_normalized = clean_text_for_bert(reference_text).strip()
     
+    logging.info(f"🔍 DEBUG: Target normalized: '{target_normalized[:50]}{'...' if len(target_normalized) > 50 else ''}'")
+    
     if not target_normalized:
+        logging.warning(f"🔍 DEBUG: Target text became empty after normalization")
         return -1
     
     # Method 1: Direct substring search (simple and reliable)
@@ -706,13 +759,19 @@ def find_available_position(target_text: str, reference_text: str, used_position
         attempts += 1
         pos = reference_normalized.find(target_normalized, search_start)
         if pos == -1:
+            logging.warning(f"🔍 DEBUG: Target not found after position {search_start}, attempt {attempts}")
             break
+        
+        logging.info(f"🔍 DEBUG: Found potential match at position {pos}, attempt {attempts}")
         
         # Check if this position range is available
         target_range = set(range(pos, pos + len(target_normalized)))
         overlap = target_range.intersection(used_positions)
         if not overlap:
+            logging.info(f"🔍 DEBUG: Position {pos} is available, target length: {len(target_normalized)}")
             return pos
+        else:
+            logging.info(f"🔍 DEBUG: Position {pos} conflicts with used positions: {list(overlap)[:10]}...")
         
         search_start = pos + 1
     
@@ -1411,8 +1470,10 @@ def create_precise_timed_segments(text_splits: List[str], original_segment_words
                 'timing_confidence': confidence
             })
             
-            logging.info(f"   ✅ MATCH FOUND! Words {start_idx}-{end_idx} ({segment_start:.2f}s-{segment_end:.2f}s)")
-            logging.info(f"      📊 Confidence: {confidence:.2f}")
+            logging.info(f"✅ DEBUG: SUCCESSFUL MATCH! spaCy sentence -> WhisperX words {start_idx}-{end_idx}")
+            logging.info(f"✅ DEBUG: Matched sentence: '{text_split[:60]}{'...' if len(text_split) > 60 else ''}'")
+            logging.info(f"✅ DEBUG: Matched timing: {segment_start:.3f}s-{segment_end:.3f}s (confidence: {confidence:.2f})")
+            logging.info(f"✅ DEBUG: WhisperX words matched: {matched_whisper_words}")
             logging.info(f"      🎯 Target:  {' '.join(split_words)}")
             logging.info(f"      🎤 Whisper: {' '.join(matched_whisper_words)}")
             
@@ -1436,7 +1497,10 @@ def create_precise_timed_segments(text_splits: List[str], original_segment_words
                     'timing_confidence': 0.0
                 })
                 
-                logging.warning(f"   🔧 Using fallback timing: {fallback_start:.2f}s-{fallback_end:.2f}s")
+                logging.warning(f"⏰ DEBUG: FALLBACK TIMING TRIGGERED - prev_end: {prev_end:.3f}s, duration estimate: {fallback_duration:.3f}s")
+                logging.warning(f"⏰ DEBUG: Fallback segment: '{text_split[:50]}{'...' if len(text_split) > 50 else ''}'")
+                logging.warning(f"⏰ DEBUG: Fallback timing: {fallback_start:.3f}s-{fallback_end:.3f}s")
+                logging.warning(f"⏰ DEBUG: Reason: Could not match spaCy sentence to WhisperX words")
             else:
                 # Very first segment with no match - use segment boundaries
                 fallback_start = whisper_clean_words[0]['start']
@@ -1450,7 +1514,10 @@ def create_precise_timed_segments(text_splits: List[str], original_segment_words
                     'timing_confidence': 0.0
                 })
                 
-                logging.warning(f"   🔧 Using fallback timing (first segment): {fallback_start:.2f}s-{fallback_end:.2f}s")
+                logging.warning(f"⏰ DEBUG: FIRST SEGMENT FALLBACK - using word[0] start: {whisper_clean_words[0]['start']:.3f}s")
+                logging.warning(f"⏰ DEBUG: First segment fallback: '{text_split[:50]}{'...' if len(text_split) > 50 else ''}'")
+                logging.warning(f"⏰ DEBUG: First segment timing: {fallback_start:.3f}s-{fallback_end:.3f}s")
+                logging.warning(f"⏰ DEBUG: Reason: First segment, could not match to WhisperX words")
     
     logging.info(f"\n📊 TIMESTAMP DEBUG: Final results for {len(segments)} segments:")
     for i, seg in enumerate(segments):
@@ -1628,7 +1695,20 @@ def _try_precision_path(transcription_result: Dict, segmentation_strategy: str) 
             logging.warning("No sentences detected by spaCy")
             return []
             
-        logging.info(f"spaCy detected {len(sentences)} sentences")
+        logging.info(f"📝 DEBUG: spaCy detected {len(sentences)} sentences")
+        logging.info(f"📝 DEBUG: Full text length: {len(final_text)} characters")
+        
+        # Log first few sentences for comparison
+        for i, sent in enumerate(sentences[:3]):
+            logging.info(f"📝 DEBUG: spaCy sentence {i+1}: '{sent[:80]}{'...' if len(sent) > 80 else ''}'")
+        
+        # Compare to WhisperX segment boundaries
+        whisper_segments = transcription_result.get("segments", [])
+        logging.info(f"📝 DEBUG: WhisperX produced {len(whisper_segments)} segments vs spaCy {len(sentences)} sentences")
+        
+        for i, seg in enumerate(whisper_segments[:3]):
+            logging.info(f"📝 DEBUG: WhisperX segment {i+1}: '{seg.get('text', '')[:80]}{'...' if len(seg.get('text', '')) > 80 else ''}'")
+            logging.info(f"📝 DEBUG: WhisperX segment {i+1} timing: {seg.get('start', 0):.3f}s-{seg.get('end', 0):.3f}s")
     except Exception as e:
         logging.warning(f"spaCy processing failed: {e}")
         return []
@@ -2241,28 +2321,24 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
             logging.warning("Failed to load from cache, will transcribe fresh")
     
     if result is None:
-        logging.info(f"🔍 {chunk_name} DEBUG: Starting Whisper transcription...")
+        logging.info(f"🔍 {chunk_name} DEBUG: Starting WhisperX transcription...")
         logging.info(f"🔍 {chunk_name} DEBUG: Audio file = {audio_to_transcribe}")
         logging.info(f"🔍 {chunk_name} DEBUG: Language = {args.source_language}")
         logging.info(f"🔍 {chunk_name} DEBUG: Word timestamps = {args.word_timestamps}")
         
         try:
-            result = model.transcribe(
+            try:
+                from src.asr.whisper_backend import transcribe_and_align_with_retries
+            except ImportError:
+                from asr.whisper_backend import transcribe_and_align_with_retries
+            result = transcribe_and_align_with_retries(
                 audio_to_transcribe,
-                language=args.source_language,
-                word_timestamps=args.word_timestamps,
-                fp16=torch.cuda.is_available(),
-                verbose=True,
-                # --- VAD Tuning ---
-                # The following parameters make Whisper's voice activity detection (VAD)
-                # more lenient. This is crucial for audio chunks where speech might be
-                # quiet, mixed with music, or otherwise ambiguous, preventing Whisper
-                # from incorrectly classifying it as silence and returning None.
-                no_speech_threshold=1.0,
-                logprob_threshold=-2.0
+                language=args.source_language or "en",
+                model_size=args.model,
+                max_retries=2,
             )
             
-            logging.info(f"🔍 {chunk_name} DEBUG: Whisper transcription completed")
+            logging.info(f"🔍 {chunk_name} DEBUG: WhisperX transcription completed")
             logging.info(f"🔍 {chunk_name} DEBUG: Result type = {type(result)}")
             logging.info(f"🔍 {chunk_name} DEBUG: Result is None = {result is None}")
             
@@ -2276,17 +2352,14 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
                             logging.info(f"🔍 {chunk_name} DEBUG: Segment {i} has {len(seg['words'])} words")
                         else:
                             logging.info(f"🔍 {chunk_name} DEBUG: Segment {i} has NO WORDS")
-                # Check for transcription anomalies and retry if needed
-                result = check_and_retry_transcription(
-                    result, model, audio_to_transcribe, args, chunk_name, audio
-                )
+                # Already retried in WhisperX backend; cache result now
                 save_to_cache(cache_path, result)
             else:
                 # This is the critical failure point for chunk_1
-                logging.error(f"🔥 {chunk_name} FAILED: Whisper returned None result (silence or no speech detection)")
+                logging.error(f"🔥 {chunk_name} FAILED: WhisperX returned None result (silence or no speech detection)")
                 logging.error(f"🔥 {chunk_name} FAILED: FORCING subtitle generation anyway to prevent missing chunk")
                 
-                # 创建一个基本的fallback字幕，确保chunk不会完全丢失
+                # Create a minimal fallback subtitle to avoid losing this chunk entirely
                 duration_sec = len(audio) / 1000.0
                 chunk_start_time_sec = timing_info.get('start_time_ms', 0) / 1000.0
                 fallback_subtitle = srt.Subtitle(
@@ -2304,7 +2377,7 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
             logging.error(f"🔥 {chunk_name} FAILED: Transcription traceback: {traceback.format_exc()}")
             logging.error(f"🔥 {chunk_name} FAILED: FORCING fallback subtitle generation to prevent chunk loss")
             
-            # 创建fallback字幕即使转录完全失败
+            # Create a fallback subtitle even if transcription completely fails
             duration_sec = len(audio) / 1000.0
             chunk_start_time_sec = timing_info.get('start_time_ms', 0) / 1000.0
             fallback_subtitle = srt.Subtitle(
@@ -2335,17 +2408,43 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
     logging.info(f"🔍 {chunk_name} DEBUG: Max chars = {args.max_subtitle_chars}")
     
     try:
-        structured_segments = structure_and_split_segments(result, args.max_subtitle_chars, args.segmentation_strategy)
-        logging.info(f"🔍 {chunk_name} DEBUG: Segmentation completed successfully")
-        logging.info(f"🔍 {chunk_name} DEBUG: Generated {len(structured_segments)} structured segments")
+        # New unified pipeline: segmentation (spaCy/Whisper) + long-split + strict alignment
+        try:
+            from src.processing.pipeline import generate_segments_with_alignment
+        except ImportError:
+            from pipeline import generate_segments_with_alignment
+        structured_segments = generate_segments_with_alignment(
+            result, args.max_subtitle_chars, args.segmentation_strategy
+        )
+        if structured_segments:
+            logging.info(f"🔍 {chunk_name} DEBUG: Alignment pipeline produced {len(structured_segments)} segments")
+        else:
+            # Fallback: use Whisper segments directly, then unified post-processing to enforce length
+            logging.warning(f"⚠️ {chunk_name} Alignment pipeline returned no segments; falling back to Whisper segments + unified processing")
+            whisper_segments = result.get('segments', []) or []
+            raw_segments = []
+            for seg in whisper_segments:
+                text = (seg.get('text') or '').strip()
+                if not text:
+                    continue
+                try:
+                    enhanced = apply_rule_based_punctuation(text)
+                except Exception:
+                    enhanced = text
+                raw_segments.append({
+                    'text': enhanced,
+                    'start': float(seg.get('start', 0.0)),
+                    'end': float(seg.get('end', 0.0)),
+                })
+            structured_segments = _apply_unified_segment_processing(raw_segments, args.max_subtitle_chars, result)
+            logging.info(f"🔍 {chunk_name} DEBUG: Fallback produced {len(structured_segments)} segments")
     except Exception as e:
         import traceback
-        logging.error(f"🔥 {chunk_name} FAILED: Segmentation failed: {e}")
-        logging.error(f"🔥 {chunk_name} FAILED: Segmentation traceback: {traceback.format_exc()}")
-        logging.error(f"🔥 {chunk_name} FAILED: This might be the NoneType subscriptable error!")
+        logging.error(f"🔥 {chunk_name} FAILED: New alignment pipeline failed: {e}")
+        logging.error(f"🔥 {chunk_name} FAILED: Traceback: {traceback.format_exc()}")
         logging.error(f"🔥 {chunk_name} FAILED: FORCING fallback subtitle generation to prevent chunk loss")
         
-        # 即使segmentation失败也生成基本字幕
+        # Even if pipeline fails, ensure the chunk produces at least one subtitle to avoid loss
         duration_sec = len(audio) / 1000.0
         chunk_start_time_sec = timing_info.get('start_time_ms', 0) / 1000.0
         fallback_subtitle = srt.Subtitle(
@@ -2514,15 +2613,10 @@ def process_chunk_with_offset(task_info: dict) -> dict:
         logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Audio size = {audio_size_mb:.2f} MB")
     
     try:
-        # Load model in thread for thread safety
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Loading Whisper model...")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = whisper.load_model(args.model, device=device)
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Whisper model loaded successfully")
-        
-        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Starting process_single_chunk...")
+        # Use WhisperX backend inside the thread (no preloaded Whisper model)
+        logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Starting process_single_chunk with WhisperX backend...")
         subs, actual_duration, preprocessed_files = process_single_chunk(
-            chunk_path, model, args, glossary, timing_info
+            chunk_path, None, args, glossary, timing_info
         )
         logging.info(f"🎯 CHUNK {chunk_index} DEBUG: process_single_chunk completed")
         logging.info(f"🎯 CHUNK {chunk_index} DEBUG: Generated {len(subs)} subtitles")
@@ -2823,7 +2917,7 @@ if __name__ == "__main__":
     
     # Core arguments
     parser.add_argument("filename", help="Input audio or video file")
-    parser.add_argument("--model", default="medium", help="Whisper model size (tiny, base, small, medium, large, large-v2, large-v3)")
+    parser.add_argument("--model", default="large-v3", help="WhisperX model size (tiny, base, small, medium, large, large-v2, large-v3)")
     parser.add_argument("--target_language", default="none", help="Target language for translation")
     parser.add_argument("--source_language", default=None, help="Source language code (auto-detect if not set)")
     parser.add_argument("--output_format", default="source", choices=['bilingual', 'source', 'target'], help="Subtitle output format")

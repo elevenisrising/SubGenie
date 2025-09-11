@@ -160,7 +160,7 @@ class GUIProcessor:
         try:
             file_name = Path(file_path).stem
             
-            log_callback(f"Starting Whisper transcription for {file_name}...")
+            log_callback(f"Starting transcription for {file_name}...")
             
             if not self.run_whisper_transcription(file_path, settings, log_callback):
                 return False
@@ -168,7 +168,7 @@ class GUIProcessor:
             if self.should_stop:
                 return False
             
-            log_callback(f"Whisper transcription completed for {file_name}.")
+            log_callback(f"Transcription completed for {file_name}.")
             
             translation_mode = settings.get('translation_mode', 'free')
             
@@ -190,11 +190,11 @@ class GUIProcessor:
             return False
     
     def run_whisper_transcription(self, file_path: str, settings: Dict[str, Any], log_callback: Callable) -> bool:
-        """Run Whisper transcription using main.py."""
+        """Run transcription using main.py (WhisperX backend)."""
         cmd = [
             sys.executable, "-u", "src/processing/main.py",
             file_path,
-            "--model", settings.get('model', 'medium'),
+            "--model", settings.get('model', 'large-v3'),
             "--target_language", settings.get('target_language', 'none'),
             "--output_format", settings.get('output_format', 'bilingual'),
             "--max_subtitle_chars", str(settings.get('max_chars', 80)),
@@ -251,8 +251,9 @@ class GUIProcessor:
         if settings.get('no_parallel_processing'):
             cmd.append("--no_parallel_processing")
 
+        # cleanup preprocessed files if user requests not to keep them
         if settings.get('no_keep_preprocessed'):
-            cmd.append("--no_keep_preprocessed")
+            cmd.append("--cleanup_preprocessed")
         if settings.get('translate_during_detection'):
              cmd.append("--translate_during_detection")
 
