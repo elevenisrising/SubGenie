@@ -540,7 +540,7 @@ class MainInterface:
         seg_label.pack(side="left", padx=(0, 5))
         self.store_translatable_component(seg_label, "segmentation_strategy_label")
         
-        self.segmentation_strategy_var = tk.StringVar(value="spacy")
+        self.segmentation_strategy_var = tk.StringVar(value=self.lang.get_string("spacy_segmentation"))
         segmentation_combo = ctk.CTkComboBox(
             lang_row3,
             values=[

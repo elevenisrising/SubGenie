@@ -41,8 +41,8 @@ try:
 except ImportError:
     # Handle when run as script
     import sys
-    from pathlib import Path
-    sys.path.append(str(Path(__file__).parent))
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from clean_segmentation import structure_and_split_segments
 import numpy as np
 import srt

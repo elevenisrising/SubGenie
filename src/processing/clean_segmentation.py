@@ -128,36 +128,148 @@ def whisper_sentence_segmentation(whisper_data: Dict) -> List[str]:
 
 
 def spacy_sentence_segmentation(all_words: List[Dict]) -> List[str]:
-    """Use spaCy for grammar-based sentence segmentation (ignore Whisper segmentation)"""
+    """Use spaCy for grammar-based sentence segmentation with time-based pre-segmentation"""
     
-    # Combine all Whisper words into complete text
-    word_texts = []
-    for word_info in all_words:
-        word = word_info.get('word', '').strip()
-        if word:
-            word_texts.append(word)
-    
-    if not word_texts:
+    if not all_words:
         logging.error("No valid words found")
         return []
     
-    full_text = " ".join(word_texts)
-    logging.info(f"Combined text: {len(full_text)} chars")
+    # Step 1: Pre-segment by 3s time gaps to avoid cross-pause grammar analysis
+    time_segments = split_by_time_gaps(all_words, max_gap=3.0)
+    logging.info(f"Time-based pre-segmentation: {len(time_segments)} segments from 3s gaps")
     
-    # Check if spaCy is available
-    if nlp is None:
-        logging.warning("spaCy not available, using fallback sentence segmentation")
-        return fallback_sentence_segmentation(full_text)
+    # Step 2: Apply spaCy grammar segmentation to each time segment
+    all_sentences = []
+    for i, segment_words in enumerate(time_segments):
+        # Combine words in this time segment
+        word_texts = []
+        for word_info in segment_words:
+            word = word_info.get('word', '').strip()
+            if word:
+                word_texts.append(word)
+        
+        if not word_texts:
+            continue
+            
+        segment_text = " ".join(word_texts)
+        logging.info(f"Time segment {i+1}: {len(segment_text)} chars")
+        
+        # Apply spaCy to this segment
+        if nlp is None:
+            logging.warning("spaCy not available, using fallback sentence segmentation")
+            segment_sentences = fallback_sentence_segmentation(segment_text)
+        else:
+            try:
+                doc = nlp(segment_text)
+                segment_sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+                logging.info(f"spaCy detected {len(segment_sentences)} sentences in segment {i+1}")
+            except Exception as e:
+                logging.error(f"spaCy processing failed for segment {i+1}: {e}, using fallback")
+                segment_sentences = fallback_sentence_segmentation(segment_text)
+        
+        all_sentences.extend(segment_sentences)
     
-    # spaCy grammar segmentation
-    try:
-        doc = nlp(full_text)
-        sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
-        logging.info(f"spaCy detected {len(sentences)} sentences")
-        return sentences
-    except Exception as e:
-        logging.error(f"spaCy processing failed: {e}, using fallback")
-        return fallback_sentence_segmentation(full_text)
+    logging.info(f"Total sentences after time-aware spaCy segmentation: {len(all_sentences)}")
+    return all_sentences
+
+
+def split_by_time_gaps(all_words: List[Dict], max_gap: float) -> List[List[Dict]]:
+    """Split word sequence by time gaps larger than max_gap seconds"""
+    if not all_words:
+        return []
+    
+    segments = []
+    current_segment = [all_words[0]]  # Start with first word
+    
+    for i in range(1, len(all_words)):
+        prev_word = all_words[i-1]
+        curr_word = all_words[i]
+        
+        prev_end = prev_word.get('end', 0.0)
+        curr_start = curr_word.get('start', 0.0)
+        time_gap = curr_start - prev_end
+        
+        if time_gap > max_gap:
+            # Gap found - finish current segment and start new one
+            if current_segment:  # Only add non-empty segments
+                segments.append(current_segment)
+            current_segment = [curr_word]
+            logging.info(f"Time gap detected: {time_gap:.2f}s > {max_gap}s threshold")
+        else:
+            # Continue current segment
+            current_segment.append(curr_word)
+    
+    # Add the last segment
+    if current_segment:
+        segments.append(current_segment)
+    
+    logging.info(f"Split into {len(segments)} segments by {max_gap}s time gaps")
+    return segments
+
+
+def try_split_by_time_gaps(sentence: str, whisper_data: Dict, max_gap: float) -> List[str]:
+    """Try to split a sentence by internal time gaps"""
+    all_words = whisper_data.get('all_words', [])
+    if not all_words:
+        return [sentence]
+    
+    # Find the word range for this sentence
+    sentence_words = extract_normalized_words(sentence)
+    if not sentence_words:
+        return [sentence]
+    
+    # Locate sentence in the word sequence
+    start_idx, end_idx = find_sentence_word_range(sentence_words, all_words)
+    if start_idx == -1 or end_idx == -1:
+        logging.debug(f"Could not locate sentence in word sequence for time gap splitting")
+        return [sentence]
+    
+    # Extract words for this sentence
+    sentence_word_data = all_words[start_idx:end_idx + 1]
+    
+    # Check for time gaps within the sentence
+    gap_positions = []
+    for i in range(1, len(sentence_word_data)):
+        prev_word = sentence_word_data[i-1]
+        curr_word = sentence_word_data[i]
+        
+        prev_end = prev_word.get('end', 0.0)
+        curr_start = curr_word.get('start', 0.0)
+        time_gap = curr_start - prev_end
+        
+        if time_gap > max_gap:
+            gap_positions.append(i)  # Position in sentence_word_data
+            logging.info(f"Found {time_gap:.2f}s gap in sentence at word {i}")
+    
+    if not gap_positions:
+        return [sentence]
+    
+    # Split sentence at gap positions
+    splits = []
+    current_start = 0
+    
+    for gap_pos in gap_positions:
+        # Get words from current_start to gap_pos (exclusive)
+        segment_words = sentence_word_data[current_start:gap_pos]
+        if segment_words:
+            segment_text = " ".join([w.get('word', '').strip() for w in segment_words]).strip()
+            if segment_text and len(segment_text) >= 10:  # Minimum length check
+                splits.append(segment_text)
+        current_start = gap_pos
+    
+    # Add remaining words
+    if current_start < len(sentence_word_data):
+        remaining_words = sentence_word_data[current_start:]
+        remaining_text = " ".join([w.get('word', '').strip() for w in remaining_words]).strip()
+        if remaining_text and len(remaining_text) >= 10:
+            splits.append(remaining_text)
+    
+    # Validate splits
+    if len(splits) > 1 and all(len(part.strip()) >= 10 for part in splits):
+        logging.info(f"Successfully split sentence by {max_gap}s time gaps: {len(splits)} parts")
+        return splits
+    
+    return [sentence]
 
 
 def fallback_sentence_segmentation(text: str) -> List[str]:
@@ -227,9 +339,15 @@ def mandatory_long_sentence_check(sentences: List[str], max_chars: int, whisper_
 
 
 def split_long_sentence(sentence: str, max_chars: int, whisper_data: Dict) -> List[str]:
-    """Split long sentence - multiple strategies"""
+    """Split long sentence - multiple strategies with time-based priority"""
     
-    # Strategy 1: Split at Whisper segment boundaries (priority)
+    # Strategy 0: Split by 1s time gaps (HIGHEST PRIORITY - NEW)
+    time_gap_splits = try_split_by_time_gaps(sentence, whisper_data, max_gap=1.0)
+    if len(time_gap_splits) > 1 and all(len(part) <= max_chars for part in time_gap_splits):
+        logging.info(f"Using 1s time gaps for long sentence")
+        return time_gap_splits
+    
+    # Strategy 1: Split at Whisper segment boundaries
     whisper_splits = try_split_at_whisper_boundaries(sentence, max_chars, whisper_data)
     if len(whisper_splits) > 1 and all(len(part) <= max_chars for part in whisper_splits):
         logging.info(f"Using Whisper boundaries")

@@ -15,7 +15,9 @@
       "Bash(cp:*)",
       "Bash(grep -n \"def structure_and_split_segments\" /mnt/d/Dream/translate/src/processing/main.py)",
       "Bash(awk:*)",
-      "Bash(PYTHONPATH=/mnt/d/Dream/translate python3 -c \"from src.processing.clean_segmentation import structure_and_split_segments; print(''Import successful from main project'')\")"
+      "Bash(PYTHONPATH=/mnt/d/Dream/translate python3 -c \"from src.processing.clean_segmentation import structure_and_split_segments; print(''Import successful from main project'')\")",
+      "Bash(D:/Anaconda/envs/asr-env/python.exe -c \"import torchaudio; print(''torchaudio version:'', torchaudio.__version__)\")",
+      "Bash(D:/Anaconda/envs/asr-env/python.exe -c \"import whisperx; print(''WhisperX version:'', whisperx.__version__)\")"
     ],
     "deny": []
   }

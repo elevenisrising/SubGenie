@@ -1,28 +1,89 @@
-# Core dependencies for SubGenie
+# SubGenie - 字幕生成和翻译工具
+# Requirements with tested compatible versions
 
-# Audio and video processing
-openai-whisper>=20231117
+# ================================
+# Core Dependencies (按安装顺序)
+# ================================
+
+# 1. 基础科学计算 - 兼容版本
+numpy>=1.22.0,<1.24.0  # TensorFlow兼容性要求
+
+# 2. PyTorch生态 - 稳定版本组合
+torch==2.0.1
+torchaudio==2.0.2
+torchvision==0.15.2
+
+# 3. 音频处理核心
+librosa==0.10.1
+soundfile==0.12.1
 pydub>=0.25.1
-whisperx>=3.1.1
+ffmpeg-python>=0.2.0
 
-# Natural language processing
-spacy>=3.7.0
+# 4. TensorFlow及兼容protobuf
+protobuf>=3.20.3,<4.0.0  # 避免版本冲突
+tensorflow==2.12.0
 
-# Subtitle handling
+# 5. Transformers和NLP
+transformers==4.30.0
+tokenizers==0.13.3
+
+# 6. WhisperX和ASR
+whisperx==3.1.1
+faster-whisper==0.9.0
+openai-whisper>=20231117
+
+# 7. 对话分离和语音处理
+pyannote.audio==3.1.1
+speechbrain==0.5.16
+
+# 8. spaCy和语言模型
+spacy>=3.6.0,<3.7.0
+
+# ================================
+# GUI和界面
+# ================================
+customtkinter>=5.2.0
+pillow>=9.0.0,<11.0.0
+tkinter  # 通常随Python安装
+
+# ================================
+# 字幕和翻译
+# ================================
 srt>=3.5.2
-
-# Translation
 deep-translator>=1.11.4
 
-# GUI framework
-customtkinter>=5.2.0
-pillow>=9.0.0
+# ================================
+# LLM集成 (可选)
+# ================================
+# 取消注释以启用特定LLM服务
+# openai>=1.3.0
+# anthropic>=0.5.0
+# google-generativeai>=0.3.0
+# ollama>=0.1.7
 
-# Utilities
-tqdm>=4.65.0
+# ================================
+# 工具和实用程序
+# ================================
 requests>=2.31.0
+tqdm>=4.65.0
+packaging>=23.1
 
-# Scientific computing
-torch>=2.0.0
-numpy>=1.24.0
-torchaudio>=2.0.0
+# ================================
+# 开发和构建工具 (可选)
+# ================================
+# pyinstaller>=5.13.0  # 用于构建可执行文件
+
+# ================================
+# 版本锁定说明
+# ================================
+# numpy: 锁定到<1.24是为了TensorFlow兼容性
+# torch/torchaudio: 使用2.0.x稳定版本避免FFmpeg问题
+# protobuf: 锁定到3.20.x避免TensorFlow冲突
+# transformers: 使用4.30.x避免与whisperx冲突
+# tensorflow: 使用2.12.0稳定版本
+
+# ================================
+# 安装后必需步骤
+# ================================
+# 安装完成后请运行:
+# python -m spacy download en_core_web_sm

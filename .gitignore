@@ -28,6 +28,8 @@ __pycache__/
 
 # Gemini CLI cache
 .cache/
+.conda/
+.claude/
 
 # Input and Output directories
 input_audio/

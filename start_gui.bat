@@ -3,16 +3,24 @@ REM =================================
 REM  SubGenie GUI Launcher (Conda)
 REM =================================
 
-REM Set the name of your Conda environment
-set CONDA_ENV_NAME=asr-env
+REM Prefer path-based env to avoid global writes; fallback to named env
+set LOCAL_ENV_PATH=D:\Dream\translate\.conda\asr-env
+set CONDA_RUN=conda run -n asr-env
+if exist "%LOCAL_ENV_PATH%\python.exe" (
+  set CONDA_RUN=conda run -p %LOCAL_ENV_PATH%
+  echo Detected local env: %LOCAL_ENV_PATH%
+) else (
+  echo Using named env: asr-env
+)
 
-echo Starting SubGenie GUI using Conda environment: %CONDA_ENV_NAME%...
+set TORCHAUDIO_USE_FFMPEG=0
+echo Starting SubGenie GUI...
 echo This may take a moment...
 echo.
 
 REM Use 'conda run' to execute the python script directly in the specified environment.
 REM This is the recommended and more reliable way to run a single task in Conda.
-conda run -n %CONDA_ENV_NAME% python main_gui.py
+%CONDA_RUN% python main_gui.py
 
 echo.
 echo Application has been closed. Press any key to exit.
