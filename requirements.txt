@@ -1,89 +1,287 @@
-# SubGenie - 字幕生成和翻译工具
-# Requirements with tested compatible versions
+aiohappyeyeballs==2.6.1
 
-# ================================
-# Core Dependencies (按安装顺序)
-# ================================
+aiohttp==3.12.15
 
-# 1. 基础科学计算 - 兼容版本
-numpy>=1.22.0,<1.24.0  # TensorFlow兼容性要求
+aiosignal==1.4.0
 
-# 2. PyTorch生态 - 稳定版本组合
-torch==2.0.1
-torchaudio==2.0.2
-torchvision==0.15.2
+alembic==1.16.5
 
-# 3. 音频处理核心
-librosa==0.10.1
-soundfile==0.12.1
-pydub>=0.25.1
-ffmpeg-python>=0.2.0
+annotated-types==0.7.0
 
-# 4. TensorFlow及兼容protobuf
-protobuf>=3.20.3,<4.0.0  # 避免版本冲突
-tensorflow==2.12.0
+antlr4-python3-runtime==4.9.3
 
-# 5. Transformers和NLP
-transformers==4.30.0
-tokenizers==0.13.3
+asteroid-filterbanks==0.4.0
 
-# 6. WhisperX和ASR
-whisperx==3.1.1
-faster-whisper==0.9.0
-openai-whisper>=20231117
+async-timeout==5.0.1
 
-# 7. 对话分离和语音处理
-pyannote.audio==3.1.1
-speechbrain==0.5.16
+attrs==25.3.0
 
-# 8. spaCy和语言模型
-spacy>=3.6.0,<3.7.0
+av==15.1.0
 
-# ================================
-# GUI和界面
-# ================================
-customtkinter>=5.2.0
-pillow>=9.0.0,<11.0.0
-tkinter  # 通常随Python安装
+beautifulsoup4==4.13.5
 
-# ================================
-# 字幕和翻译
-# ================================
-srt>=3.5.2
-deep-translator>=1.11.4
+blis==1.3.0
 
-# ================================
-# LLM集成 (可选)
-# ================================
-# 取消注释以启用特定LLM服务
-# openai>=1.3.0
-# anthropic>=0.5.0
-# google-generativeai>=0.3.0
-# ollama>=0.1.7
+catalogue==2.0.10
 
-# ================================
-# 工具和实用程序
-# ================================
-requests>=2.31.0
-tqdm>=4.65.0
-packaging>=23.1
+certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1754231422783/work/certifi
 
-# ================================
-# 开发和构建工具 (可选)
-# ================================
-# pyinstaller>=5.13.0  # 用于构建可执行文件
+cffi==2.0.0
 
-# ================================
-# 版本锁定说明
-# ================================
-# numpy: 锁定到<1.24是为了TensorFlow兼容性
-# torch/torchaudio: 使用2.0.x稳定版本避免FFmpeg问题
-# protobuf: 锁定到3.20.x避免TensorFlow冲突
-# transformers: 使用4.30.x避免与whisperx冲突
-# tensorflow: 使用2.12.0稳定版本
+charset-normalizer==3.4.3
 
-# ================================
-# 安装后必需步骤
-# ================================
-# 安装完成后请运行:
-# python -m spacy download en_core_web_sm
+click==8.3.0
+
+cloudpathlib==0.22.0
+
+colorama==0.4.6
+
+coloredlogs==15.0.1
+
+colorlog==6.9.0
+
+confection==0.1.5
+
+contourpy==1.3.2
+
+ctranslate2==4.4.0
+
+customtkinter==5.2.2
+
+cycler==0.12.1
+
+cymem==2.0.11
+
+darkdetect==0.8.0
+
+deep-translator==1.11.4
+
+docopt==0.6.2
+
+einops==0.8.1
+
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
+
+faster-whisper==1.2.0
+
+filelock @ file:///home/conda/feedstock_root/build_artifacts/filelock_1755216263872/work
+
+flatbuffers==25.2.10
+
+fonttools==4.60.0
+
+frozenlist==1.7.0
+
+fsspec==2025.9.0
+
+greenlet==3.2.4
+
+huggingface-hub==0.35.0
+
+humanfriendly==10.0
+
+HyperPyYAML==1.2.2
+
+idna==3.10
+
+Jinja2 @ file:///home/conda/feedstock_root/build_artifacts/jinja2_1741263328855/work
+
+joblib==1.5.2
+
+julius==0.2.7
+
+kiwisolver==1.4.9
+
+langcodes==3.5.0
+
+language_data==1.3.0
+
+lightning==2.5.5
+
+lightning-utilities==0.15.2
+
+llvmlite==0.45.0
+
+Mako==1.3.10
+
+marisa-trie==1.3.1
+
+markdown-it-py==4.0.0
+
+MarkupSafe @ file:///D:/bld/markupsafe_1733219610373/work
+
+matplotlib==3.10.6
+
+mdurl==0.1.2
+
+more-itertools==10.8.0
+
+mpmath @ file:///home/conda/feedstock_root/build_artifacts/mpmath_1733302684489/work
+
+multidict==6.6.4
+
+murmurhash==1.0.13
+
+networkx @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_networkx_1731521053/work
+
+nltk==3.9.1
+
+numba==0.62.0
+
+numpy @ file:///D:/bld/numpy_1747544591878/work/dist/numpy-2.2.6-cp310-cp310-win_amd64.whl#sha256=af66576ce916c795ffa81be9620c8138a3fda6e1713b2bf7775a630e47eca3a8
+
+omegaconf==2.3.0
+
+onnxruntime==1.22.1
+
+openai-whisper==20250625
+
+optuna==4.5.0
+
+packaging==25.0
+
+pandas==2.3.2
+
+pillow==10.4.0
+
+preshed==3.0.10
+
+primePy==1.3
+
+propcache==0.3.2
+
+protobuf==6.32.1
+
+pyannote.audio==3.4.0
+
+pyannote.core==5.0.0
+
+pyannote.database==5.1.3
+
+pyannote.metrics==3.2.1
+
+pyannote.pipeline==3.0.1
+
+pycparser==2.23
+
+pydantic==2.11.9
+
+pydantic_core==2.33.2
+
+pydub==0.25.1
+
+Pygments==2.19.2
+
+pyparsing==3.2.4
+
+pyreadline3==3.5.4
+
+python-dateutil==2.9.0.post0
+
+pytorch-lightning==2.5.5
+
+pytorch-metric-learning==2.9.0
+
+pytz==2025.2
+
+PyYAML @ file:///D:/bld/pyyaml_1737454681229/work
+
+regex==2025.9.18
+
+requests==2.32.5
+
+rich==14.1.0
+
+ruamel.yaml==0.18.15
+
+ruamel.yaml.clib==0.2.12
+
+safetensors==0.6.2
+
+scikit-learn==1.7.2
+
+scipy==1.15.3
+
+semver==3.0.4
+
+sentencepiece==0.2.1
+
+shellingham==1.5.4
+
+six==1.17.0
+
+smart_open==7.3.1
+
+sortedcontainers==2.4.0
+
+soundfile==0.13.1
+
+soupsieve==2.8
+
+spacy==3.8.7
+
+spacy-legacy==3.0.12
+
+spacy-loggers==1.0.5
+
+speechbrain==1.0.3
+
+SQLAlchemy==2.0.43
+
+srsly==2.5.1
+
+srt==3.5.3
+
+sympy==1.13.1
+
+tabulate==0.9.0
+
+tensorboardX==2.6.4
+
+thinc==8.3.6
+
+threadpoolctl==3.6.0
+
+tiktoken==0.11.0
+
+tokenizers==0.22.0
+
+tomli==2.2.1
+
+torch==2.5.1+cu121
+
+torch-audiomentations==0.12.0
+
+torch_pitch_shift==1.2.5
+
+torchaudio==2.5.1+cu121
+
+torchmetrics==1.8.2
+
+torchvision==0.20.1+cu121
+
+tqdm==4.67.1
+
+transformers==4.56.1
+
+typer==0.17.4
+
+typing-inspection==0.4.1
+
+typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing_extensions_1756220668/work
+
+tzdata==2025.2
+
+urllib3==2.5.0
+
+wasabi==1.1.3
+
+weasel==0.4.1
+
+whisperx==3.4.2
+
+wrapt==1.17.3
+
+yarl==1.20.1
+
+

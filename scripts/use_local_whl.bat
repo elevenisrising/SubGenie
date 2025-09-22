@@ -43,9 +43,9 @@ echo [STEP] Installing whisper/whisperx from local wheels if available...
   echo [INFO] No local whisper/whisperx wheels found; skipping.
 )
 
-echo [STEP] Installing common runtime deps (requests/librosa/ffmpeg-python)...
-%CONDA_RUN% python -m pip install --no-index --find-links "%WHL_DIR%" requests* librosa* ffmpeg_python* || (
-  echo [INFO] No local requests/librosa/ffmpeg-python wheels; skipping.
+echo [STEP] Installing common runtime deps (requests)...
+%CONDA_RUN% python -m pip install --no-index --find-links "%WHL_DIR%" requests* || (
+  echo [INFO] No local requests wheel; skipping.
 )
 
 echo [VERIFY] Torch and torchaudio versions:

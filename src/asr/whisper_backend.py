@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Dict, Any, List, Tuple
 from pathlib import Path
 
@@ -31,6 +32,18 @@ def transcribe_and_align(audio_path: str, language: str = "en", model_size: str 
 
     Returns a dict with key 'segments', where each segment contains 'text','start','end','words'.
     """
+    # Avoid torchaudio FFmpeg backend crashes on Windows by preferring soundfile
+    os.environ.setdefault("TORCHAUDIO_USE_FFMPEG", "0")
+    try:
+        import torchaudio
+        try:
+            torchaudio.set_audio_backend("soundfile")
+            logging.info("🎤 DEBUG: Set torchaudio backend to 'soundfile'")
+        except Exception as e:
+            logging.warning(f"🎤 DEBUG: Could not set torchaudio backend to 'soundfile': {e}")
+    except Exception as e:
+        logging.warning(f"🎤 DEBUG: torchaudio not available or failed to import: {e}")
+
     import whisperx  # imported here to avoid hard dependency at import time
 
     device = _get_device()
@@ -160,4 +173,3 @@ def transcribe_and_align_with_retries(audio_path: str, language: str, model_size
     logging.info("ℹ️  WhisperX: Alignment failures will be handled at sentence level.")
     
     return result
-

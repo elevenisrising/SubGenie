@@ -282,13 +282,9 @@ def normalize_audio_volume(audio: AudioSegment, target_dbfs: float = -20.0) -> A
     change_in_dbfs = target_dbfs - audio.dBFS
     return audio.apply_gain(change_in_dbfs)
 
-def denoise_audio(audio: AudioSegment, strength: float = 0.5, use_ai_separation: bool = False) -> AudioSegment:
-    """Apply noise reduction to audio while preserving low-volume speech."""
-    
-    if use_ai_separation:
-        return extract_vocals_with_spleeter(audio, strength)
-    else:
-        return apply_traditional_denoise(audio, strength)
+def denoise_audio(audio: AudioSegment, strength: float = 0.5) -> AudioSegment:
+    """Apply noise reduction to audio while preserving low-volume speech (traditional method only)."""
+    return apply_traditional_denoise(audio, strength)
 
 
 def apply_traditional_denoise(audio: AudioSegment, strength: float) -> AudioSegment:
@@ -313,92 +309,7 @@ def apply_traditional_denoise(audio: AudioSegment, strength: float) -> AudioSegm
     return audio._spawn(denoised_samples)
 
 
-def extract_vocals_with_spleeter(audio: AudioSegment, mix_ratio: float) -> AudioSegment:
-    """Extract vocals using AI separation (Spleeter)."""
-    try:
-        import tempfile
-        import os
-        
-        # Check if spleeter is available
-        try:
-            from spleeter.separator import Separator
-            import librosa
-            import soundfile as sf
-        except ImportError:
-            logging.warning("Spleeter not installed, falling back to traditional denoising")
-            return apply_traditional_denoise(audio, mix_ratio)
-        
-        # Create temporary files
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
-            temp_vocal_path = temp_input.name.replace('.wav', '_vocals.wav')
-            
-            # Export original audio to temp file
-            audio.export(temp_input.name, format='wav')
-            
-            # Initialize separator
-            separator = Separator('spleeter:2stems-16kHz')
-            
-            # Load and process audio
-            waveform, sr = librosa.load(temp_input.name, sr=16000, mono=False)
-            
-            # Ensure 2D array for spleeter
-            if waveform.ndim == 1:
-                waveform = waveform[np.newaxis, :]
-            
-            # Separate vocals and accompaniment
-            prediction = separator.separate(waveform)
-            
-            # Extract vocals
-            vocals = prediction['vocals']
-            
-            # Convert to mono if stereo
-            if vocals.shape[0] > 1:
-                vocals_mono = np.mean(vocals, axis=0)
-            else:
-                vocals_mono = vocals[0]
-            
-            # Resample to original sample rate if needed
-            if sr != audio.frame_rate:
-                vocals_resampled = librosa.resample(vocals_mono, orig_sr=sr, target_sr=audio.frame_rate)
-            else:
-                vocals_resampled = vocals_mono
-            
-            # Convert to AudioSegment format
-            vocals_int16 = np.clip(vocals_resampled * 32767, -32767, 32767).astype(np.int16)
-            vocals_audio = audio._spawn(vocals_int16)
-            
-            # Clean up temp files
-            os.unlink(temp_input.name)
-            if os.path.exists(temp_vocal_path):
-                os.unlink(temp_vocal_path)
-            
-            # Mix original and extracted vocals based on mix_ratio
-            # mix_ratio closer to 1.0 = more vocals, less background
-            original_weight = max(0.1, 1.0 - mix_ratio)  # Keep at least 10% original
-            vocal_weight = mix_ratio
-            
-            # Ensure same length - pad shorter audio if needed
-            original_length = len(audio)
-            vocals_length = len(vocals_audio)
-            
-            if vocals_length < original_length:
-                # Pad vocals_audio to match original length
-                padding = AudioSegment.silent(duration=original_length - vocals_length)
-                vocals_audio = vocals_audio + padding
-                logging.warning(f"AI separation result was shorter ({vocals_length}ms vs {original_length}ms), padded with silence")
-            elif vocals_length > original_length:
-                # Trim vocals_audio to match original length
-                vocals_audio = vocals_audio[:original_length]
-                logging.warning(f"AI separation result was longer ({vocals_length}ms vs {original_length}ms), trimmed to match")
-            
-            mixed = (audio * original_weight + vocals_audio * vocal_weight)
-            
-            logging.info(f"AI vocal separation completed (mix ratio: {mix_ratio:.1f})")
-            return mixed
-            
-    except Exception as e:
-        logging.warning(f"AI vocal separation failed: {e}, falling back to traditional denoising")
-        return apply_traditional_denoise(audio, mix_ratio)
+## Removed AI vocal separation (spleeter) path per user request.
 
 def detect_speaker_changes(audio: AudioSegment, min_duration_sec: float) -> List[float]:
     """Detect potential speaker changes in audio."""
@@ -2293,8 +2204,7 @@ def process_single_chunk(chunk_path: Path, model: Any, args: argparse.Namespace,
             audio = normalize_audio_volume(audio, args.target_dbfs)
         
         if not args.no_denoise:
-            use_ai = getattr(args, 'use_ai_vocal_separation', False)
-            audio = denoise_audio(audio, args.noise_reduction_strength, use_ai_separation=use_ai)
+            audio = denoise_audio(audio, args.noise_reduction_strength)
         
         if not args.no_speaker_detection:
             changes = detect_speaker_changes(audio, args.min_speaker_duration)
@@ -2939,7 +2849,7 @@ if __name__ == "__main__":
     parser.add_argument("--no_normalize_audio", action="store_true", help="Disable volume normalization")
     parser.add_argument("--no_denoise", action="store_true", help="Disable noise reduction")
     parser.add_argument("--noise_reduction_strength", type=float, default=0.5, help="Noise reduction strength (0.1-1.0)")
-    parser.add_argument("--use_ai_vocal_separation", action="store_true", help="Use AI vocal separation instead of traditional denoising")
+    # Removed use_ai_vocal_separation option
     parser.add_argument("--target_dbfs", type=float, default=-20.0, help="Target dBFS for volume normalization")
     parser.add_argument("--no_speaker_detection", action="store_true", help="Disable speaker change detection")
     parser.add_argument("--min_speaker_duration", type=float, default=2.0, help="Minimum duration between speaker changes (seconds)")

@@ -13,6 +13,9 @@ if exist "%LOCAL_ENV_PATH%\python.exe" (
   echo Using named env: asr-env
 )
 
+REM Ensure FFmpeg DLLs from Conda env are found first
+set PATH=%LOCAL_ENV_PATH%\Library\bin;%PATH%
+
 set TORCHAUDIO_USE_FFMPEG=0
 echo Starting SubGenie GUI...
 echo This may take a moment...

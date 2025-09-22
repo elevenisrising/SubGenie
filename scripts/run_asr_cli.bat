@@ -18,6 +18,12 @@ if "%~1"=="" (
   exit /b 1
 )
 
+REM Ensure FFmpeg DLLs from Conda env are found first
+set PATH=%LOCAL_ENV_PATH%\Library\bin;%PATH%
+
+REM Disable torchaudio FFmpeg extension to avoid DLL issues; use soundfile backend where possible
+set TORCHAUDIO_USE_FFMPEG=0
+
 %CONDA_RUN% python %SCRIPT% %*
 
 endlocal

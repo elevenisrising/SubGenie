@@ -211,8 +211,7 @@ class GUIProcessor:
             cmd.append("--no_normalize_audio")
         if settings.get('no_denoise'):
             cmd.append("--no_denoise")
-        if settings.get('use_ai_vocal_separation'):
-            cmd.append("--use_ai_vocal_separation")
+        # Removed AI vocal separation option
 
         # Add parameters with values and validation
         try:

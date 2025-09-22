@@ -41,8 +41,8 @@ echo [STEP] Install base runtime deps (requests, pillow, customtkinter, pydub, s
 %CONDA_RUN% python -m pip install requests pillow customtkinter pydub srt tqdm numpy
 
 echo.
-echo [STEP] Install audio/processing deps (soundfile, librosa, ffmpeg-python)...
-%CONDA_RUN% python -m pip install soundfile librosa ffmpeg-python
+echo [STEP] Install audio/processing deps (soundfile)...
+%CONDA_RUN% python -m pip install soundfile
 
 echo.
 echo [STEP] Install PyTorch stack (prefer local wheels if present)...

@@ -614,10 +614,7 @@ class MainInterface:
         no_denoise_check.pack(side="left", padx=10)
         self.store_translatable_component(no_denoise_check, "disable_denoise_checkbox")
         
-        self.use_ai_vocal_separation_var = tk.BooleanVar(value=False)
-        ai_vocal_check = ctk.CTkCheckBox(check_row, text=self.lang.get_string("use_ai_vocal_separation_checkbox"), variable=self.use_ai_vocal_separation_var)
-        ai_vocal_check.pack(side="left", padx=10)
-        self.store_translatable_component(ai_vocal_check, "use_ai_vocal_separation_checkbox")
+        # Removed AI vocal separation option per user request
         
         # Parameters
         param_row = ctk.CTkFrame(audio_frame)
@@ -1394,7 +1391,6 @@ class MainInterface:
             "no_audio_preprocessing": self.no_preprocessing_var.get(),
             "no_normalize_audio": self.no_normalize_var.get(),
             "no_denoise": self.no_denoise_var.get(),
-            "use_ai_vocal_separation": self.use_ai_vocal_separation_var.get(),
             "target_dbfs": float(self.target_dbfs_var.get()) if self.target_dbfs_var.get() else -20.0,
             "noise_reduction_strength": float(self.denoise_strength_var.get()) if self.denoise_strength_var.get() else 0.5,
             
