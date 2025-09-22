@@ -1,3 +1,5 @@
+[English](README.md) | [??](README.zh.md)
+
 # SubGenie - AI-Powered Subtitle Generator
 
 SubGenie delivers end-to-end subtitle generation, translation, and polishing for creators. It specialises in gaming and livestream content, providing word-level timestamps with WhisperX alignment and spaCy-guided sentence segmentation.
@@ -88,3 +90,4 @@ start_gui.bat         # Windows launcher selecting .conda\asr-env
 
 ## License
 See [LICENSE](LICENSE) for details.
+
