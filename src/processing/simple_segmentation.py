@@ -272,7 +272,7 @@ def mandatory_timestamp_assignment(sentences: List[str], whisper_data: Dict) -> 
     
     # 创建清理后的词序列用于匹配
     clean_word_sequence = []
-    for word_info in all_words:
+    for i, word_info in enumerate(all_words):
         original_word = word_info.get('word', '').strip()
         if original_word:
             # 清理标点但保留缩写（I'm, don't等）
@@ -284,6 +284,10 @@ def mandatory_timestamp_assignment(sentences: List[str], whisper_data: Dict) -> 
                     'start': word_info.get('start', 0.0),
                     'end': word_info.get('end', 0.0)
                 })
+        
+        # 显示处理进度
+        if (i + 1) % 100 == 0 or i == len(all_words) - 1:
+            logging.info(f"   🔄 Processing words: {i + 1}/{len(all_words)}")
     
     logging.info(f"   📊 {len(clean_word_sequence)} words available for matching")
     
@@ -295,8 +299,12 @@ def mandatory_timestamp_assignment(sentences: List[str], whisper_data: Dict) -> 
     
     # 逐句匹配
     for i, sentence in enumerate(sentences):
-        logging.info(f"\n   🎯 Matching sentence {i+1}/{len(sentences)}")
-        logging.info(f"      Text: '{sentence[:50]}{'...' if len(sentence) > 50 else ''}'")
+        # logging.info(f"\n   🎯 Matching sentence {i+1}/{len(sentences)}")
+        # logging.info(f"      Text: '{sentence[:50]}{'...' if len(sentence) > 50 else ''}'")
+        
+        # 简化进度显示
+        if (i + 1) % 10 == 0 or i == len(sentences) - 1:
+            logging.info(f"   🎯 Matching sentences: {i + 1}/{len(sentences)}")
         
         # 滑动窗口匹配
         start_idx, end_idx, confidence = sliding_window_match(sentence, clean_word_sequence, used_word_indices)
@@ -319,19 +327,38 @@ def mandatory_timestamp_assignment(sentences: List[str], whisper_data: Dict) -> 
             # 统计匹配质量
             if confidence == 1.0:
                 perfect_matches += 1
-                emoji = "✅"
+                # emoji = "✅"
             elif confidence >= 0.8:
                 good_matches += 1
-                emoji = "🟡"
+                # emoji = "🟡"
             else:
                 poor_matches += 1
-                emoji = "🟠"
+                # emoji = "🟠"
             
-            logging.info(f"      {emoji} Match: words [{start_idx}-{end_idx}], confidence: {confidence:.2f}")
-            logging.info(f"         Time: {segment['start']:.2f}s - {segment['end']:.2f}s")
+            # 注释掉详细匹配信息
+            # logging.info(f"      {emoji} Match: words [{start_idx}-{end_idx}], confidence: {confidence:.2f}")
+            # logging.info(f"         Time: {segment['start']:.2f}s - {segment['end']:.2f}s")
         else:
-            # 匹配失败，创建fallback segment
-            logging.error(f"      ❌ Match FAILED - creating fallback segment")
+            # 匹配失败，创建fallback segment并输出详细debug信息
+            logging.error(f"\n❌ MATCH FAILED for sentence {i+1}/{len(sentences)}:")
+            logging.error(f"   原句: '{sentence}'")
+            
+            # 提取句子的清理词用于debug
+            sentence_clean_words = []
+            for word in sentence.split():
+                clean_word = re.sub(r'[^\w\s\'-]', '', word).lower().strip()
+                if clean_word:
+                    sentence_clean_words.append(clean_word)
+            
+            logging.error(f"   句子清理后的词: {sentence_clean_words}")
+            
+            # 显示附近可用的词序列用于分析
+            available_start = max(0, len([idx for idx in range(len(clean_word_sequence)) if idx not in used_word_indices]) - 10)
+            available_words = [clean_word_sequence[i]['clean_word'] for i in range(len(clean_word_sequence)) if i not in used_word_indices]
+            if available_words:
+                logging.error(f"   可用词序列(前20个): {available_words[:20]}")
+            else:
+                logging.error(f"   ⚠️  所有词都已被使用!")
             
             fallback_segment = {
                 'text': sentence,
@@ -341,6 +368,7 @@ def mandatory_timestamp_assignment(sentences: List[str], whisper_data: Dict) -> 
                 'timing_confidence': 0.0
             }
             final_segments.append(fallback_segment)
+            poor_matches += 1
     
     # 统计和报告
     total_sentences = len(sentences)
@@ -378,7 +406,7 @@ def sliding_window_match(sentence: str, word_sequence: List[Dict], used_indices:
     if not sentence_words:
         return -1, -1, 0.0
     
-    logging.info(f"         🔍 Searching for {len(sentence_words)} words: {sentence_words[:5]}{'...' if len(sentence_words) > 5 else ''}")
+    # logging.info(f"         🔍 Searching for {len(sentence_words)} words: {sentence_words[:5]}{'...' if len(sentence_words) > 5 else ''}")
     
     best_start = -1
     best_end = -1
@@ -409,7 +437,7 @@ def sliding_window_match(sentence: str, word_sequence: List[Dict], used_indices:
         
         # 完美匹配，立即返回
         if confidence == 1.0:
-            logging.info(f"         🎯 Perfect match found at words [{start_idx}-{end_idx}]")
+            # logging.info(f"         🎯 Perfect match found at words [{start_idx}-{end_idx}]")
             return start_idx, end_idx, confidence
         
         # 记录最佳部分匹配
@@ -420,13 +448,13 @@ def sliding_window_match(sentence: str, word_sequence: List[Dict], used_indices:
     
     # 只接受高置信度的匹配
     if best_confidence >= 0.8:
-        logging.info(f"         🟡 Good partial match: {best_confidence:.2f} at words [{best_start}-{best_end}]")
+        # logging.info(f"         🟡 Good partial match: {best_confidence:.2f} at words [{best_start}-{best_end}]")
         return best_start, best_end, best_confidence
     elif best_confidence > 0.0:
-        logging.warning(f"         🟠 Poor match: {best_confidence:.2f} (rejected)")
+        # logging.warning(f"         🟠 Poor match: {best_confidence:.2f} (rejected)")
         return -1, -1, best_confidence
     else:
-        logging.error(f"         ❌ No match found")
+        # logging.error(f"         ❌ No match found")
         return -1, -1, 0.0
 
 
